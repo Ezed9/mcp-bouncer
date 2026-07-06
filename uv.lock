@@ -943,6 +943,7 @@ name = "mcp-bouncer"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "mcp" },
     { name = "pyyaml" },
 ]
@@ -961,6 +962,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "agentdojo", marker = "extra == 'benchmark'", specifier = ">=0.1.35" },
+    { name = "anyio", specifier = ">=4.0" },
     { name = "mcp", specifier = ">=1.2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
