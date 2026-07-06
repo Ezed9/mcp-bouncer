@@ -7,9 +7,11 @@ tested here; `main`'s I/O plumbing is exercised only implicitly (it's a thin
 wrapper around these).
 """
 
+import json
+
 import pytest
 
-from bouncer.cli import _upstream_from_config, rewrite_config
+from bouncer.cli import _upstream_from_config, main, rewrite_config
 
 
 def test_rewrite_wraps_server_and_preserves_original() -> None:
@@ -86,3 +88,46 @@ def test_upstream_from_config_raises_when_server_missing() -> None:
     cfg = {"mcpServers": {"fs": {"command": "npx", "args": ["x"]}}}
     with pytest.raises(ValueError):
         _upstream_from_config(cfg, "does-not-exist")
+
+
+def test_init_emits_runnable_args(tmp_path, monkeypatch) -> None:
+    """`bouncer init`'s wrapped entry must be spawnable by a real MCP client:
+    its args must parse cleanly through the SAME argparse parser `main` uses
+    for `run`, carrying both `--config` (self-sufficient, absolute path) and
+    `--upstream-name` (matching the wrapped server).
+    """
+    cfg_path = tmp_path / "client_config.json"
+    cfg = {"mcpServers": {"filesystem": {"command": "npx",
+           "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"]}}}
+    cfg_path.write_text(json.dumps(cfg))
+
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+    rc = main(["init", "--config", str(cfg_path)])
+    assert rc == 0
+
+    written = json.loads(cfg_path.read_text())
+    entry = written["mcpServers"]["filesystem"]
+    assert entry["command"] == "bouncer"
+
+    resolved = str(cfg_path.resolve())
+    assert entry["args"] == [
+        "run", "--config", resolved, "--upstream-name", "filesystem",
+    ]
+
+    # The wrapped args must parse through the REAL `main`/`run` argparse
+    # setup without error -- that's the actual init->run contract a spawned
+    # MCP client depends on. Stub `_cmd_run` so no live proxy is launched;
+    # this still exercises the real parser in `main`, only skipping the I/O
+    # body of `_cmd_run`.
+    seen: dict[str, object] = {}
+
+    def fake_cmd_run(config_path, server_name):
+        seen["config_path"] = config_path
+        seen["server_name"] = server_name
+        return 0
+
+    monkeypatch.setattr("bouncer.cli._cmd_run", fake_cmd_run)
+    run_rc = main(entry["args"])
+    assert run_rc == 0
+    assert str(seen["config_path"]) == resolved
+    assert seen["server_name"] == "filesystem"

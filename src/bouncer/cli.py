@@ -73,11 +73,13 @@ def _upstream_from_config(
 
 def _cmd_init(config_path: Path, server_names: list[str]) -> int:
     config = json.loads(config_path.read_text())
+    resolved_config_path = config_path.resolve()
     updated = config
     for name in server_names or list(config.get("mcpServers", {})):
         updated = rewrite_config(
             updated, name, command="bouncer",
-            args=["run", "--upstream-name", name],
+            args=["run", "--config", str(resolved_config_path),
+                  "--upstream-name", name],
         )
     if updated == config:
         print("No changes (already wrapped or no matching servers).")
