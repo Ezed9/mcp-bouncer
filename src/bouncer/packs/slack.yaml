@@ -1,0 +1,18 @@
+# Curated pack: Slack MCP server (e.g. the reference server-slack tool set).
+# Tool/param names follow the commonly documented Slack MCP schemas; some
+# servers prefix tool names (e.g. slack_post_message) — see TODOs below.
+post_message:
+  exfiltrating: true
+  sink_params: [channel]
+# Some Slack MCP servers prefix tool names with "slack_".
+# TODO: verify against live slack server schema
+slack_post_message:
+  exfiltrating: true
+  sink_params: [channel_id, channel]
+reply_to_thread:
+  exfiltrating: true
+  sink_params: [channel]
+# TODO: verify against live slack server schema
+slack_reply_to_thread:
+  exfiltrating: true
+  sink_params: [channel_id, channel]

@@ -1,0 +1,20 @@
+# Curated pack: filesystem MCP server (e.g. @modelcontextprotocol/server-filesystem).
+# Tool/param names follow the official server's documented tools/list schema.
+write_file:
+  write_params: [path]
+  allowed_path_prefixes: []      # left open; users set their own in bouncer.yaml
+edit_file:
+  write_params: [path]
+  allowed_path_prefixes: []
+create_directory:
+  write_params: [path]
+  allowed_path_prefixes: []
+move_file:
+  write_params: [source, destination]
+  allowed_path_prefixes: []
+# delete_file: not exposed by the official reference server as of this writing;
+# some forks/variants do expose a delete tool under this name.
+# TODO: verify against live filesystem server schema
+delete_file:
+  write_params: [path]
+  max_calls: 2

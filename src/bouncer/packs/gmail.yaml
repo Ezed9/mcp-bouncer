@@ -1,0 +1,17 @@
+# Curated pack: Gmail MCP server (e.g. gongrzhe/server-gmail-autoauth-mcp and
+# similar community Gmail servers). Tool/param names follow common documented
+# schemas for these servers.
+send_email:
+  exfiltrating: true
+  sink_params: [to, cc, bcc]
+  trusted_destinations: []
+draft_email:
+  exfiltrating: true
+  sink_params: [to, cc, bcc]
+  trusted_destinations: []
+# reply_email/forward_email are exposed by some Gmail servers under these names.
+# TODO: verify against live gmail server schema
+reply_email:
+  exfiltrating: true
+  sink_params: [to, cc, bcc]
+  trusted_destinations: []

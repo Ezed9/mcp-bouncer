@@ -1,0 +1,13 @@
+# Curated pack: Google Drive MCP server. The official reference server-gdrive
+# is read-only (search/read_file); sharing/permission tools below are exposed
+# by community Google Drive/Workspace MCP servers.
+# TODO: verify against live gdrive server schema
+share_file:
+  exfiltrating: true
+  sink_params: [email]
+# Some servers name the sharing tool create_permission with a role/emailAddress
+# param pair (mirrors the Google Drive API's permissions.create).
+# TODO: verify against live gdrive server schema
+create_permission:
+  exfiltrating: true
+  sink_params: [emailAddress, email]

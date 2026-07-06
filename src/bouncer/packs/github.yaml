@@ -1,0 +1,23 @@
+# Curated pack: GitHub MCP server (e.g. github/github-mcp-server, formerly
+# @modelcontextprotocol/server-github). Tool/param names follow the official
+# documented tools/list schema.
+create_issue:
+  exfiltrating: true
+  sink_params: [owner, repo]
+add_issue_comment:
+  exfiltrating: true
+  sink_params: [owner, repo]
+create_pull_request:
+  exfiltrating: true
+  sink_params: [owner, repo]
+create_or_update_file:
+  exfiltrating: true
+  sink_params: [owner, repo]
+  write_params: [path]
+push_files:
+  exfiltrating: true
+  sink_params: [owner, repo]
+  write_params: [files]
+fork_repository:
+  exfiltrating: true
+  sink_params: [owner, repo]

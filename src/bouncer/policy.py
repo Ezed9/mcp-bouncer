@@ -57,6 +57,11 @@ def _policy_from_dict(name: str, raw: dict[str, object]) -> ToolPolicy:
     )
 
 
+def builtin_pack_paths() -> list[Path]:
+    packs_dir = Path(__file__).parent / "packs"
+    return sorted(packs_dir.glob("*.yaml"))
+
+
 def load_policies(paths: list[Path]) -> dict[str, ToolPolicy]:
     out: dict[str, ToolPolicy] = {}
     for path in paths:
