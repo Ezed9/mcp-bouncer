@@ -16,12 +16,23 @@ from pathlib import PurePosixPath
 from .approvals import ApprovalStore, approval_key
 from .audit import AuditLog
 from .policy import PolicyResolver
-from .taint import TaintTracker
+from .taint import TaintTracker, normalize
 from .types import AuditEntry, Decision, ToolCall, ToolPolicy, TrustLevel, Verdict
 
 
 def _normeq(s: str) -> str:
     return os.path.normpath(str(s))
+
+
+def _scalar_dests(value: object) -> list[str]:
+    # Flatten a sink arg into its scalar destination strings. A list/tuple (the
+    # normal multi-recipient shape) is all destinations; nested lists flatten too.
+    if isinstance(value, (list, tuple)):
+        out: list[str] = []
+        for item in value:
+            out.extend(_scalar_dests(item))
+        return out
+    return [str(value)]
 
 
 def _within_prefix(value: str, prefix: str) -> bool:
@@ -129,26 +140,28 @@ class ContractEngine:
         for param in sinks:
             if param not in call.args:
                 continue
-            value = str(call.args[param])
-            trust = self._trust_of(call.tool, param, value, policy)
-            if trust is TrustLevel.TAINTED:
-                return Decision(
-                    Verdict.DENY,
-                    f"destination {param}={value!r} came from untrusted data",
-                    "sink_gate",
-                )
-            if trust is TrustLevel.UNPROVEN and pending_ask is None:
-                pending_ask = Decision(
-                    Verdict.ASK,
-                    f"destination {param}={value!r} is not a vouched recipient",
-                    "sink_gate",
-                    ask_key=approval_key(call.tool, param, value),
-                )
+            # A list/tuple sink is a set of destinations; classify each element so
+            # a tainted address hidden in a multi-recipient list still DENYs.
+            for value in _scalar_dests(call.args[param]):
+                trust = self._trust_of(call.tool, param, value, policy)
+                if trust is TrustLevel.TAINTED:
+                    return Decision(
+                        Verdict.DENY,
+                        f"destination {param}={value!r} came from untrusted data",
+                        "sink_gate",
+                    )
+                if trust is TrustLevel.UNPROVEN and pending_ask is None:
+                    pending_ask = Decision(
+                        Verdict.ASK,
+                        f"destination {param}={value!r} is not a vouched recipient",
+                        "sink_gate",
+                        ask_key=approval_key(call.tool, param, value),
+                    )
         return pending_ask
 
     def _trust_of(self, tool: str, param: str, value: str, policy: ToolPolicy) -> TrustLevel:
-        norm_allow = {d.strip().lower() for d in policy.trusted_destinations}
-        if value.strip().lower() in norm_allow:
+        norm_allow = {normalize(d) for d in policy.trusted_destinations}
+        if normalize(value) in norm_allow:
             return TrustLevel.TRUSTED
         if self._approvals.is_approved(approval_key(tool, param, str(value))):
             return TrustLevel.TRUSTED
