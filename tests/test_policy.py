@@ -1,7 +1,9 @@
 # bouncer/tests/test_policy.py
 from pathlib import Path
 
-from bouncer.policy import PolicyResolver, load_policies
+import pytest
+
+from bouncer.policy import PolicyError, PolicyResolver, _policy_from_dict, load_policies
 
 
 def _schema(*props: str) -> dict[str, object]:
@@ -44,3 +46,16 @@ def test_heuristics_disabled_returns_bare_policy() -> None:
     r = PolicyResolver(overrides={}, use_heuristics=False)
     p = r.policy_for("send_email", _schema("to"))
     assert p.exfiltrating is False
+
+
+def test_malformed_top_level_yaml_raises_policy_error(tmp_path: Path) -> None:
+    f = tmp_path / "bad.yaml"
+    f.write_text("- a\n- b\n")
+    with pytest.raises(PolicyError) as exc_info:
+        load_policies([f])
+    assert str(f) in str(exc_info.value)
+
+
+def test_bool_max_calls_is_rejected() -> None:
+    p = _policy_from_dict("send_email", {"max_calls": True})
+    assert p.max_calls is None

@@ -17,6 +17,10 @@ from .heuristics import derive_policy
 from .types import ToolPolicy
 
 
+class PolicyError(ValueError):
+    """Raised when a policy file is structurally invalid."""
+
+
 def _policy_from_dict(name: str, raw: dict[str, object]) -> ToolPolicy:
     def _tuple(key: str) -> tuple[str, ...]:
         val = raw.get(key, [])
@@ -36,7 +40,11 @@ def _policy_from_dict(name: str, raw: dict[str, object]) -> ToolPolicy:
         write_params=_tuple("write_params"),
         allowed_path_prefixes=_tuple("allowed_path_prefixes"),
         arg_patterns=arg_patterns,
-        max_calls=int(max_calls) if isinstance(max_calls, int) else None,
+        max_calls=(
+            int(max_calls)
+            if isinstance(max_calls, int) and not isinstance(max_calls, bool)
+            else None
+        ),
     )
 
 
@@ -44,6 +52,11 @@ def load_policies(paths: list[Path]) -> dict[str, ToolPolicy]:
     out: dict[str, ToolPolicy] = {}
     for path in paths:
         data = yaml.safe_load(path.read_text()) or {}
+        if not isinstance(data, dict):
+            raise PolicyError(
+                f"malformed policy file {path}: top-level YAML must be a mapping of "
+                f"tool-name to policy, got {type(data).__name__}"
+            )
         for name, raw in data.items():
             out[name] = _policy_from_dict(name, raw if isinstance(raw, dict) else {})
     return out
