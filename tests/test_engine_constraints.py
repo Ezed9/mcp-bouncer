@@ -44,6 +44,22 @@ def test_write_inside_prefix_allowed(tmp_path: Path) -> None:
     assert d.verdict == Verdict.ALLOW
 
 
+def test_path_traversal_is_denied(tmp_path: Path) -> None:
+    pol = ToolPolicy(name="write_file", write_params=("path",),
+                     allowed_path_prefixes=("./out",))
+    eng = _engine(tmp_path, {"write_file": pol}, schemas={"write_file": {}})
+    traversal = eng.evaluate(
+        ToolCall(tool="write_file", args={"path": "./out/../../etc/passwd"})
+    )
+    assert traversal.verdict == Verdict.DENY
+    assert traversal.contract == "constraint"
+    inside = eng.evaluate(ToolCall(tool="write_file", args={"path": "./out/notes.txt"}))
+    assert inside.verdict == Verdict.ALLOW
+    collision = eng.evaluate(ToolCall(tool="write_file", args={"path": "./outside/x"}))
+    assert collision.verdict == Verdict.DENY
+    assert collision.contract == "constraint"
+
+
 def test_budget_denies_after_limit(tmp_path: Path) -> None:
     pol = ToolPolicy(name="delete_file", max_calls=2)
     eng = _engine(tmp_path, {"delete_file": pol}, schemas={"delete_file": {}})

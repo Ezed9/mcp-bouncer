@@ -56,6 +56,19 @@ def test_malformed_top_level_yaml_raises_policy_error(tmp_path: Path) -> None:
     assert str(f) in str(exc_info.value)
 
 
+def test_malformed_arg_pattern_raises_policy_error(tmp_path: Path) -> None:
+    f = tmp_path / "bad_pattern.yaml"
+    f.write_text(
+        "set_mode:\n"
+        "  arg_patterns:\n"
+        "    mode: \"[\"\n"
+    )
+    with pytest.raises(PolicyError) as exc_info:
+        load_policies([f])
+    assert "set_mode" in str(exc_info.value)
+    assert "[" in str(exc_info.value)
+
+
 def test_bool_max_calls_is_rejected() -> None:
     p = _policy_from_dict("send_email", {"max_calls": True})
     assert p.max_calls is None

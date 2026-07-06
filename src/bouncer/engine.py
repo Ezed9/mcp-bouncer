@@ -9,13 +9,27 @@ append — this module is the load-bearing safety boundary.
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import PurePosixPath
 
 from .approvals import ApprovalStore, approval_key
 from .audit import AuditLog
 from .policy import PolicyResolver
 from .taint import TaintTracker
 from .types import AuditEntry, Decision, ToolCall, ToolPolicy, TrustLevel, Verdict
+
+
+def _normeq(s: str) -> str:
+    return os.path.normpath(str(s))
+
+
+def _within_prefix(value: str, prefix: str) -> bool:
+    # Normalize both as POSIX paths (MCP tool args are posix-style); a value is
+    # contained iff, after collapsing '.'/'..', prefix is an ancestor-or-equal.
+    v = PurePosixPath(_normeq(value))
+    p = PurePosixPath(_normeq(prefix))
+    return v == p or p in v.parents
 
 
 class ContractEngine:
@@ -85,7 +99,9 @@ class ContractEngine:
         for param in policy.write_params:
             if param in call.args and policy.allowed_path_prefixes:
                 value = str(call.args[param])
-                if not any(value.startswith(pre) for pre in policy.allowed_path_prefixes):
+                if not any(
+                    _within_prefix(value, pre) for pre in policy.allowed_path_prefixes
+                ):
                     return Decision(
                         Verdict.DENY,
                         f"{param}={value!r} outside allowed prefixes "

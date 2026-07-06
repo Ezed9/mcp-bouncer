@@ -9,6 +9,7 @@ folded into pack authoring rather than trusted at runtime, per the design's
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -31,6 +32,14 @@ def _policy_from_dict(name: str, raw: dict[str, object]) -> ToolPolicy:
         tuple((str(k), str(v)) for k, v in patterns.items())
         if isinstance(patterns, dict) else ()
     )
+    for arg, pattern in arg_patterns:
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise PolicyError(
+                f"invalid arg_patterns regex for tool {name!r}, "
+                f"arg {arg!r}: {pattern!r} ({exc})"
+            ) from exc
     max_calls = raw.get("max_calls")
     return ToolPolicy(
         name=name,
