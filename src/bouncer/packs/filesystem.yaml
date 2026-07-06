@@ -1,5 +1,7 @@
 # Curated pack: filesystem MCP server (e.g. @modelcontextprotocol/server-filesystem).
-# Tool/param names follow the official server's documented tools/list schema.
+# Tool/param names verified live against the reference server's tools/list on
+# 2026-07-06 (see bouncer/docs/manual-smoke.md). The reference server exposes NO
+# delete tool, so `delete_file` was removed. Mutating tools kept below.
 write_file:
   write_params: [path]
   allowed_path_prefixes: []      # left open; users set their own in bouncer.yaml
@@ -12,9 +14,3 @@ create_directory:
 move_file:
   write_params: [source, destination]
   allowed_path_prefixes: []
-# delete_file: not exposed by the official reference server as of this writing;
-# some forks/variants do expose a delete tool under this name.
-# TODO: verify against live filesystem server schema
-delete_file:
-  write_params: [path]
-  max_calls: 2

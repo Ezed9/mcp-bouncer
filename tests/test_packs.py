@@ -20,3 +20,13 @@ def test_resolver_uses_packs_over_heuristics() -> None:
     r = PolicyResolver(overrides=load_policies(builtin_pack_paths()))
     p = r.policy_for("send_email", {"properties": {"to": {}, "body": {}}})
     assert p.exfiltrating is True
+
+
+def test_filesystem_pack_matches_live_tool_surface() -> None:
+    # Names verified live against @modelcontextprotocol/server-filesystem
+    # (2026-07-06): the reference server exposes no delete tool.
+    policies = load_policies(builtin_pack_paths())
+    assert "delete_file" not in policies
+    for tool in ("write_file", "edit_file", "create_directory", "move_file"):
+        assert tool in policies, f"filesystem pack missing {tool}"
+    assert policies["move_file"].write_params == ("source", "destination")

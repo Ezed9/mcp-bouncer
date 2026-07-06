@@ -9,18 +9,31 @@ v25.2.1, `@modelcontextprotocol/server-filesystem` (latest via `npx -y`).
 Nothing here is invented. Where a scenario could not be demonstrated through the
 proxy, that is stated plainly and the real reason is recorded.
 
+> **RE-RUN UPDATE (2026-07-06, after the fix):** the original run reproduced
+> Bug 1 (`Output validation error`), Finding 1 (no user policy) and Finding 2
+> (`delete_file` mismatch). After the fix commit
+> (`fix(bouncer): relay upstream structuredContent, load user policy in serve,
+> correct filesystem pack`) the smoke driver was **re-run live** and now
+> passes: the ALLOWED write succeeds end-to-end, and a user policy passed via
+> `bouncer run --policy` enforces the constraint and budget scenarios THROUGH
+> the proxy. The failing excerpts below are kept for provenance and each is
+> annotated with its now-passing re-run result. The new "Re-run after the fix"
+> section holds the fresh captured output.
+
 ---
 
 ## TL;DR of what was observed
 
 | # | Scenario | Path exercised | Verdict observed | Notes |
 |---|----------|----------------|------------------|-------|
-| a | `read_file`, then `write_file` into `./out` | **live proxy** | engine **ALLOW** | Engine allowed; **transport then failed** — see Bug 1. |
-| b | `write_file` to `/etc/x` | live proxy → **N/A**; **direct engine** | proxy **ALLOW** (no user policy loaded); engine **DENY** (constraint) | Proxy can't load a user YAML — see Finding 1. |
-| c | delete tool 3× (`max_calls=2`) | live proxy → **N/A**; **direct engine** | proxy **ASK** (unknown tool); engine ALLOW/ALLOW/**DENY** (budget) | `delete_file` is **not exposed** by the live server — see Finding 2. |
+| a | `read_file`, then `write_file` into `./out` | **live proxy** | engine **ALLOW**; **now succeeds end-to-end** | Was Bug 1 (transport); **fixed** — see Re-run. |
+| b | `write_file` to `/etc/x` | **live proxy (with `--policy`)** | proxy **DENY** (constraint) | `--policy` now loadable — Finding 1 **fixed**; see Re-run. |
+| c | write budget 3× (`max_calls=2`) | **live proxy (with `--policy`)** | ALLOW / **DENY** / DENY (budget) | Demonstrated on the real `write_file` tool (no delete tool exists). |
 | d | sink gate (exfiltrating send + tainted output) | **direct engine** (+ automated suite) | ALLOW / **DENY** / ASK | Filesystem server has no send tool — see Reconciliation. |
 
-**Two real findings and one real bug were reproduced. See the "Findings" section.**
+**The two findings and the bug reproduced in the first run are now FIXED and
+re-verified live (see "Re-run after the fix"). The original excerpts are kept
+below for provenance.**
 
 ---
 
@@ -105,7 +118,8 @@ Real `tools/list` from the live server (through the proxy):
 
 **Note:** there is NO `delete_file` and NO exfiltrating/send tool in this list.
 
-Real per-call output:
+Real per-call output **from the original (pre-fix) run** (kept for provenance;
+see "Re-run after the fix" above for the now-passing output):
 
 ```
 --- a1 read_file: read_file({'path': '.../smoke_work/mcp-config.json'}) ---
@@ -157,7 +171,76 @@ Interpretation of these six audited lines:
 
 ---
 
-## Findings (real, reproduced)
+## Re-run after the fix (2026-07-06) — the proof
+
+All captured live after the fix commit. `scripts/smoke_driver.py` is the
+original driver; `scripts/smoke_driver_policy.py` is a new driver that launches
+`bouncer run … --policy smoke_work/user-policy.yaml`.
+
+### (a) ALLOW forward now succeeds end-to-end (Bug 1 fixed)
+
+`uv run python scripts/smoke_driver.py` — real per-call output (verbatim):
+
+```
+--- a1 read_file: read_file({'path': '.../smoke_work/mcp-config.json'}) ---
+OK: { ...file contents... }
+
+--- a2 write_file into out: write_file({'path': '.../smoke_work/out/hello.txt', 'content': 'hello from smoke'}) ---
+OK: Successfully wrote to .../smoke_work/out/hello.txt
+
+--- b write_file to /etc: write_file({'path': '/etc/bouncer_should_not_write.txt', 'content': 'nope'}) ---
+ERROR/DENY: Access denied - path outside allowed directories: /etc/... (upstream server error, relayed faithfully via isError)
+```
+
+No more `Output validation error`. The proxy now relays the upstream
+`CallToolResult` (its `content` + `structuredContent` + `isError`) verbatim, so
+the SDK's outputSchema validation passes. The `/etc` line here (no user policy)
+is the *upstream* filesystem server's own refusal, surfaced faithfully as an
+error result — distinct from a Bouncer DENY.
+
+### (b) + (c) user policy enforces THROUGH the proxy (Finding 1 fixed)
+
+`smoke_work/user-policy.yaml` (throwaway) layered over the packs via `--policy`:
+
+```yaml
+write_file:
+  write_params: [path]
+  allowed_path_prefixes: [".../smoke_work/out"]
+  max_calls: 2
+```
+
+`uv run python scripts/smoke_driver_policy.py` — real output (verbatim):
+
+```
+--- b write_file to /etc: write_file({'path': '/etc/bouncer_should_not_write.txt', 'content': 'nope'}) ---
+ERROR/DENY: [bouncer blocked] path='/etc/bouncer_should_not_write.txt' outside allowed prefixes ['.../smoke_work/out']
+
+--- c write #1 into out ---  OK: Successfully wrote to .../out/note1.txt
+--- c write #2 into out ---  ERROR/DENY: [bouncer blocked] call budget 2 for 'write_file' exceeded
+--- c write #3 into out ---  ERROR/DENY: [bouncer blocked] call budget 2 for 'write_file' exceeded
+```
+
+Real proxy audit log (`~/.bouncer/audit.jsonl`) for this run, verbatim:
+
+```json
+{"tool": "write_file", "args": {"path": "/etc/bouncer_should_not_write.txt", "content": "nope"}, "verdict": "deny", "reason": "path='/etc/bouncer_should_not_write.txt' outside allowed prefixes ['.../smoke_work/out']", "contract": "constraint"}
+{"tool": "write_file", "args": {"path": ".../out/note1.txt", "content": "ok"}, "verdict": "allow", "reason": "", "contract": "default"}
+{"tool": "write_file", "args": {"path": ".../out/note2.txt", "content": "ok"}, "verdict": "deny", "reason": "call budget 2 for 'write_file' exceeded", "contract": "budget"}
+{"tool": "write_file", "args": {"path": ".../out/note3.txt", "content": "ok"}, "verdict": "deny", "reason": "call budget 2 for 'write_file' exceeded", "contract": "budget"}
+```
+
+**DENY-never-forwards confirmed live:** only `note1.txt` exists on disk after the
+run; `note2.txt`/`note3.txt` (both budget-DENY) were never written, i.e. the
+upstream was never reached. The `/etc` DENY is now Bouncer's *own* constraint
+(`contract: constraint`), not the upstream server's refusal.
+
+> Note on tool choice: scenario (c) is demonstrated on the real `write_file`
+> tool (with a user `max_calls`) because the reference server exposes **no
+> delete tool** — see Finding 2, now fixed in the pack.
+
+---
+
+## Findings (real, reproduced — now fixed, see Re-run above)
 
 ### Finding 1 — the proxy cannot load a user-policy YAML
 
@@ -345,9 +428,15 @@ uv run pytest tests/test_engine_sink_gate.py -q
 
 ## Status
 
-**DONE_WITH_CONCERNS.** The proxy runs end-to-end and its engine verdicts are
-correct and audited, but this first live exercise surfaced (1) a real
-ALLOW-path transport bug (Bug 1: unstructured output vs. declared
-`outputSchema`), (2) the proxy's inability to load a user-policy YAML (Finding
-1), and (3) confirmation that the pack's `delete_file` is not exposed by the
-reference server (Finding 2). All three are left for separate fixes, as required.
+**Original run: DONE_WITH_CONCERNS** — surfaced Bug 1, Finding 1, Finding 2.
+
+**Re-run after the fix (2026-07-06): DONE.** All three are fixed and
+re-verified live (see "Re-run after the fix"):
+- Bug 1 — the proxy now relays the upstream `CallToolResult`
+  (`content` + `structuredContent` + `isError`) verbatim; the ALLOWED write
+  succeeds end-to-end with no `Output validation error`.
+- Finding 1 — `bouncer run --policy <yaml>` (and `BouncerProxy.serve(...,
+  user_policy=...)`) now layers a user contract over the packs; the constraint
+  and budget scenarios enforce through the proxy.
+- Finding 2 — `src/bouncer/packs/filesystem.yaml` no longer lists the
+  non-existent `delete_file`; its tool names were verified live on 2026-07-06.

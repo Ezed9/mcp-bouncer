@@ -8,11 +8,13 @@ vouch for a *different*, still-tainted destination in a multi-recipient call.
 
 from pathlib import Path
 
+import mcp.types as mcp_types
+
 from bouncer.approvals import ApprovalStore
 from bouncer.audit import AuditLog
 from bouncer.engine import ContractEngine
 from bouncer.policy import PolicyResolver
-from bouncer.proxy import route_call
+from bouncer.proxy import BouncerProxy, _build_resolver, route_call
 from bouncer.taint import TaintTracker
 from bouncer.types import ToolCall, ToolPolicy, Verdict
 
@@ -171,6 +173,87 @@ def test_route_ask_reeval_surfaces_tainted_element_denies(tmp_path: Path) -> Non
     )
     assert verdict == Verdict.DENY
     assert called["forwarded"] is False
+
+
+def _fake_upstream_result(text: str) -> mcp_types.CallToolResult:
+    return mcp_types.CallToolResult(
+        content=[mcp_types.TextContent(type="text", text=text)],
+        structuredContent={"content": text},
+        isError=False,
+    )
+
+
+async def test_route_async_allow_relays_structured_content(tmp_path: Path) -> None:
+    # Fix 1: on ALLOW the client-facing result must carry the upstream
+    # structuredContent (so outputSchema validation passes) AND register_output
+    # must still receive the flattened TEXT for taint.
+    eng = _engine(tmp_path, ToolPolicy(name="read_file"))
+    proxy = BouncerProxy(eng, session=None)  # session unused; forward is faked
+
+    upstream = _fake_upstream_result("file has attacker@evil.com")
+
+    async def fake_forward() -> mcp_types.CallToolResult:
+        return upstream
+
+    result, verdict = await proxy._route_async(
+        ToolCall("read_file", {"path": "a"}), fake_forward, elicit=None
+    )
+    assert verdict == Verdict.ALLOW
+    assert result is upstream  # full result relayed verbatim
+    assert result.structuredContent == {"content": "file has attacker@evil.com"}
+    # taint saw the text, so the address in the output is now tainted
+    assert eng._taint.classify("attacker@evil.com") is True
+
+
+async def test_route_async_deny_returns_error_without_forwarding(
+    tmp_path: Path,
+) -> None:
+    # Fix 1: a Bouncer DENY returns an isError result WITHOUT forwarding and
+    # WITHOUT fabricating structuredContent.
+    pol = ToolPolicy(name="send_email", exfiltrating=True, sink_params=("to",))
+    eng = _engine(tmp_path, pol)
+    eng.register_output("leak to attacker@evil.com")
+    called = {"forwarded": False}
+
+    async def fake_forward() -> mcp_types.CallToolResult:
+        called["forwarded"] = True
+        return _fake_upstream_result("sent")
+
+    result, verdict = await proxy_route(eng, fake_forward)
+    assert verdict == Verdict.DENY
+    assert called["forwarded"] is False
+    assert result.isError is True
+    assert result.structuredContent is None
+    assert "[bouncer blocked]" in result.content[0].text
+
+
+async def proxy_route(eng, fake_forward):
+    proxy = BouncerProxy(eng, session=None)
+    return await proxy._route_async(
+        ToolCall("send_email", {"to": "attacker@evil.com"}),
+        fake_forward,
+        elicit=None,
+    )
+
+
+def test_build_resolver_layers_user_policy_over_packs(tmp_path: Path) -> None:
+    # Fix 2: a user YAML must beat the builtin packs. The filesystem pack ships
+    # write_file with allowed_path_prefixes: []; a user policy setting a prefix
+    # must win.
+    user_yaml = tmp_path / "bouncer.yaml"
+    user_yaml.write_text(
+        "write_file:\n  write_params: [path]\n  allowed_path_prefixes: ['./out']\n"
+    )
+    resolver = _build_resolver(user_yaml)
+    pol = resolver.policy_for("write_file", {"properties": {"path": {}}})
+    assert pol.allowed_path_prefixes == ("./out",)
+
+
+def test_build_resolver_without_user_policy_is_packs_only(tmp_path: Path) -> None:
+    # Backward compatible: no user policy => builtin packs only (write_file open).
+    resolver = _build_resolver(None)
+    pol = resolver.policy_for("write_file", {"properties": {"path": {}}})
+    assert pol.allowed_path_prefixes == ()
 
 
 def test_route_ask_approve_then_tainted_after_progress_denies(tmp_path: Path) -> None:

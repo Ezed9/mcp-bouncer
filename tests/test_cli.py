@@ -121,9 +121,10 @@ def test_init_emits_runnable_args(tmp_path, monkeypatch) -> None:
     # body of `_cmd_run`.
     seen: dict[str, object] = {}
 
-    def fake_cmd_run(config_path, server_name):
+    def fake_cmd_run(config_path, server_name, user_policy=None):
         seen["config_path"] = config_path
         seen["server_name"] = server_name
+        seen["user_policy"] = user_policy
         return 0
 
     monkeypatch.setattr("bouncer.cli._cmd_run", fake_cmd_run)

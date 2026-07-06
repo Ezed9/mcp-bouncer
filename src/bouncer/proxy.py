@@ -113,6 +113,35 @@ def _result_text(result: mcp_types.CallToolResult) -> str:
     return "\n".join(parts)
 
 
+def _denied_result(reason: str) -> mcp_types.CallToolResult:
+    """A Bouncer DENY surfaced as an error tool-result — no upstream forward.
+
+    `isError=True` and no `structuredContent`: the model reads the deny reason
+    as a tool error, distinct from an upstream error. Returning a bare
+    `CallToolResult` makes the low-level SDK relay it verbatim (it does not
+    re-validate a returned `CallToolResult` against the tool's outputSchema),
+    so an unstructured deny is safe even for tools that declare an outputSchema.
+    """
+    return mcp_types.CallToolResult(
+        content=[mcp_types.TextContent(type="text", text=f"[bouncer blocked] {reason}")],
+        isError=True,
+    )
+
+
+def _build_resolver(user_policy: Path | None = None) -> PolicyResolver:
+    """Resolver over the builtin packs, with an optional user YAML on top.
+
+    `load_policies` builds a single name->policy dict where later paths win, so
+    listing the user YAML *after* the packs makes it the highest-priority
+    override (a user contract beats a curated pack). No user policy => packs
+    only, exactly as before.
+    """
+    paths = builtin_pack_paths()
+    if user_policy is not None:
+        paths = [*paths, user_policy]
+    return PolicyResolver(overrides=load_policies(paths))
+
+
 class BouncerProxy:
     """Stdio MCP proxy that gates one upstream server behind the engine."""
 
@@ -126,12 +155,17 @@ class BouncerProxy:
         upstream_command: str,
         upstream_args: list[str] | None = None,
         server_name: str = "bouncer",
+        user_policy: Path | None = None,
     ) -> None:
         """Connect the upstream, pin its schemas, build the engine, and serve.
 
         `upstream_command`/`upstream_args` are the launch command for the
         upstream stdio MCP server (the CLI in Task 12 supplies these from its
         config). We stay connected for the whole session.
+
+        `user_policy`, if given, is a user contract YAML layered as the
+        highest-priority override over the builtin packs (see
+        `_build_resolver`). None keeps the prior behaviour: builtin packs only.
         """
         params = StdioServerParameters(
             command=upstream_command,
@@ -149,7 +183,7 @@ class BouncerProxy:
             }
 
             engine = ContractEngine(
-                resolver=PolicyResolver(overrides=load_policies(builtin_pack_paths())),
+                resolver=_build_resolver(user_policy),
                 taint=TaintTracker(),
                 approvals=ApprovalStore(),
                 audit=AuditLog(_DEFAULT_AUDIT_PATH),
@@ -171,22 +205,28 @@ class BouncerProxy:
         @server.call_tool()
         async def _call_tool(
             name: str, arguments: dict[str, object]
-        ) -> list[mcp_types.ContentBlock]:
+        ) -> mcp_types.CallToolResult:
             ctx = server.request_context
             call = ToolCall(tool=name, args=arguments)
 
-            async def do_forward() -> str:
-                result = await self._upstream.call_tool(name, arguments)
-                return _result_text(result)
+            async def do_forward() -> mcp_types.CallToolResult:
+                # Relay the FULL upstream result so its structuredContent and
+                # content survive to the client and the SDK's outputSchema
+                # validation passes. `register_output` still gets the flattened
+                # text for taint; that split happens in `_route_async`.
+                return await self._upstream.call_tool(name, arguments)
 
             elicit = self._make_elicit(ctx)
-            text, verdict = await self._route_async(call, do_forward, elicit)
+            result, verdict = await self._route_async(call, do_forward, elicit)
             if verdict is Verdict.DENY:
-                # Raised so the SDK marks the tools/call result isError=True; the
-                # model reads the deny reason as a tool error and never sees an
-                # upstream result (the upstream was never called).
-                raise _ToolDenied(text)
-            return [mcp_types.TextContent(type="text", text=text)]
+                # A Bouncer DENY: return an error result WITHOUT forwarding and
+                # WITHOUT fabricating structuredContent. Returning a
+                # CallToolResult directly makes the SDK relay it as-is (no
+                # outputSchema re-validation), so an unstructured error is fine.
+                return result
+            # ALLOW/ASK-approved: `result` is the upstream CallToolResult,
+            # relayed verbatim (content + structuredContent + isError).
+            return result
 
         options = server.create_initialization_options(
             notification_options=NotificationOptions()
@@ -197,9 +237,9 @@ class BouncerProxy:
     async def _route_async(
         self,
         call: ToolCall,
-        forward: Callable[[], Awaitable[str]],
+        forward: Callable[[], Awaitable[mcp_types.CallToolResult]],
         elicit: AsyncElicit,
-    ) -> tuple[str, Verdict]:
+    ) -> tuple[mcp_types.CallToolResult, Verdict]:
         """Async mirror of `route_call` for the live transport.
 
         Structurally identical to `route_call` — same order, same fail-closed
@@ -207,35 +247,43 @@ class BouncerProxy:
         `call_tool` and the elicitation round-trip, which the sync helper cannot.
         `route_call` remains the single, exhaustively-tested statement of the
         policy; this keeps line-for-line parity with it.
+
+        Unlike the pure helper (which relays flattened text), this returns the
+        FULL upstream `CallToolResult` on ALLOW so `structuredContent`, `content`,
+        and `isError` reach the client intact; taint still sees only the text.
         """
         decision = self._engine.evaluate(call)
 
         if decision.verdict is Verdict.ALLOW:
-            text = await forward()
-            self._engine.register_output(text)
-            return text, Verdict.ALLOW
+            return await self._forward_and_record(forward), Verdict.ALLOW
 
         if decision.verdict is Verdict.DENY:
-            return f"[bouncer blocked] {decision.reason}", Verdict.DENY
+            return _denied_result(decision.reason), Verdict.DENY
 
         if elicit is None:
-            return f"[bouncer blocked] {decision.reason}", Verdict.DENY
+            return _denied_result(decision.reason), Verdict.DENY
 
         max_rounds = _distinct_destination_count(call) + 1
         for _ in range(max_rounds):
             if decision.verdict is Verdict.ALLOW:
-                text = await forward()
-                self._engine.register_output(text)
-                return text, Verdict.ALLOW
+                return await self._forward_and_record(forward), Verdict.ALLOW
             if decision.verdict is Verdict.DENY:
-                return f"[bouncer blocked] {decision.reason}", Verdict.DENY
+                return _denied_result(decision.reason), Verdict.DENY
             approved = await elicit(decision.reason)
             if not approved or decision.ask_key is None:
-                return f"[bouncer blocked] {decision.reason}", Verdict.DENY
+                return _denied_result(decision.reason), Verdict.DENY
             self._engine.on_approved(decision.ask_key)
             decision = self._engine.evaluate(call)
 
-        return f"[bouncer blocked] {decision.reason}", Verdict.DENY
+        return _denied_result(decision.reason), Verdict.DENY
+
+    async def _forward_and_record(
+        self, forward: Callable[[], Awaitable[mcp_types.CallToolResult]]
+    ) -> mcp_types.CallToolResult:
+        """Forward upstream, feed the TEXT to taint, and relay the full result."""
+        result = await forward()
+        self._engine.register_output(_result_text(result))
+        return result
 
     def _make_elicit(self, ctx: object) -> AsyncElicit:
         """Return an async elicit callable, or None if the client can't elicit.
@@ -261,7 +309,3 @@ class BouncerProxy:
             return result.action == "accept"
 
         return _elicit
-
-
-class _ToolDenied(Exception):
-    """Raised so the SDK marks the tools/call result as an error for the model."""

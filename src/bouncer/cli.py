@@ -93,13 +93,15 @@ def _cmd_init(config_path: Path, server_names: list[str]) -> int:
     return 0
 
 
-def _cmd_run(config_path: Path, server_name: str) -> int:
+def _cmd_run(
+    config_path: Path, server_name: str, user_policy: Path | None = None
+) -> int:
     config = json.loads(config_path.read_text())
     command, args = _upstream_from_config(config, server_name)
 
     from .proxy import BouncerProxy  # deferred: avoids importing MCP for `init`
 
-    anyio.run(BouncerProxy.serve, command, args, server_name)
+    anyio.run(BouncerProxy.serve, command, args, server_name, user_policy)
     return 0
 
 
@@ -115,12 +117,16 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="run the proxy for one upstream server")
     run.add_argument("--config", type=Path, required=True)
     run.add_argument("--upstream-name", required=True)
+    run.add_argument(
+        "--policy", "--user-policy", dest="policy", type=Path, default=None,
+        help="optional user contract YAML, layered over the builtin packs",
+    )
 
     ns = parser.parse_args(argv)
     if ns.cmd == "init":
         return _cmd_init(ns.config, ns.server)
     if ns.cmd == "run":
-        return _cmd_run(ns.config, ns.upstream_name)
+        return _cmd_run(ns.config, ns.upstream_name, ns.policy)
     return 2
 
 
