@@ -118,8 +118,33 @@ class ContractEngine:
         return None
 
     def _check_sink_gate(self, call: ToolCall, policy: ToolPolicy) -> Decision | None:
-        # Implemented in Task 9. Until then, no sink enforcement.
-        return None
+        if not policy.exfiltrating:
+            return None
+        # Fail-closed: an exfiltrating tool with no declared sinks treats every
+        # arg as a destination, so a forgotten declaration can never leave a sink
+        # unguarded.
+        sinks = policy.sink_params or tuple(call.args.keys())
+
+        pending_ask: Decision | None = None
+        for param in sinks:
+            if param not in call.args:
+                continue
+            value = str(call.args[param])
+            trust = self._trust_of(call.tool, param, value, policy)
+            if trust is TrustLevel.TAINTED:
+                return Decision(
+                    Verdict.DENY,
+                    f"destination {param}={value!r} came from untrusted data",
+                    "sink_gate",
+                )
+            if trust is TrustLevel.UNPROVEN and pending_ask is None:
+                pending_ask = Decision(
+                    Verdict.ASK,
+                    f"destination {param}={value!r} is not a vouched recipient",
+                    "sink_gate",
+                    ask_key=approval_key(call.tool, param, value),
+                )
+        return pending_ask
 
     def _trust_of(self, tool: str, param: str, value: str, policy: ToolPolicy) -> TrustLevel:
         norm_allow = {d.strip().lower() for d in policy.trusted_destinations}
