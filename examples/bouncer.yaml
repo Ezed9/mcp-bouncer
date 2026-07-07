@@ -1,0 +1,23 @@
+# bouncer/examples/bouncer.yaml — copy to your project, edit, and pass with:
+#   bouncer run --config <mcp config> --upstream-name <server> --policy bouncer.yaml
+#
+# A user policy is layered on top of the builtin packs (src/bouncer/packs/*.yaml)
+# and wins on any tool name it also defines. Tool and param names below are
+# illustrative — confirm the real tool/arg names your upstream server exposes
+# (e.g. via its tools/list) before relying on this in production.
+
+send_email:
+  exfiltrating: true
+  sink_params: [to, cc, bcc]
+  trusted_destinations: [you@yourcompany.com]   # your own always-ok recipients
+
+write_file:
+  write_params: [path]
+  allowed_path_prefixes: ["./out", "./tmp"]
+
+# Example call budget. Note: the reference filesystem MCP server does not
+# expose a delete tool (verified live — see docs/manual-smoke.md), so this
+# entry only binds if your upstream server actually has one.
+delete_file:
+  write_params: [path]
+  max_calls: 2
