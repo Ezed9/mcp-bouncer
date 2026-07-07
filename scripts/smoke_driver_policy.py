@@ -5,7 +5,10 @@ wrapping the reference filesystem server, then acts as a client. Proves the two
 fixes end-to-end: (1) an ALLOWED write into ./out succeeds with real
 structuredContent relay, and (2) the user policy enforces THROUGH the proxy —
 write outside the allowed prefix is DENIED by Bouncer's own contract, and the
-write budget (max_calls=2) DENIES the 3rd allowed-prefix write.
+write budget (max_calls=2) DENIES the 2nd allowed-prefix write — because the
+earlier constraint-denied /etc call already consumed a budget slot (budgets
+count attempts, not successes; the budget check runs before the constraint
+check).
 
 Throwaway; lives under scripts/ purely as smoke evidence.
 """
@@ -64,7 +67,9 @@ async def main() -> None:
             await call("b write_file to /etc", "write_file",
                        {"path": "/etc/bouncer_should_not_write.txt", "content": "nope"})
 
-            # budget: 3 writes into ./out with max_calls=2 -> 3rd DENY (budget)
+            # budget: 3 writes into ./out with max_calls=2 -> 2nd DENY (budget),
+            # because the earlier constraint-denied /etc call above already
+            # consumed a budget slot (budget counts attempts, not successes)
             for i in (1, 2, 3):
                 await call(f"c write #{i} into out", "write_file",
                            {"path": f"{base}/out/note{i}.txt", "content": "ok"})

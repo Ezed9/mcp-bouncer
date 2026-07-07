@@ -28,7 +28,7 @@ proxy, that is stated plainly and the real reason is recorded.
 |---|----------|----------------|------------------|-------|
 | a | `read_file`, then `write_file` into `./out` | **live proxy** | engine **ALLOW**; **now succeeds end-to-end** | Was Bug 1 (transport); **fixed** — see Re-run. |
 | b | `write_file` to `/etc/x` | **live proxy (with `--policy`)** | proxy **DENY** (constraint) | `--policy` now loadable — Finding 1 **fixed**; see Re-run. |
-| c | write budget 3× (`max_calls=2`) | **live proxy (with `--policy`)** | ALLOW / **DENY** / DENY (budget) | Demonstrated on the real `write_file` tool (no delete tool exists). |
+| c | write budget 3× (`max_calls=2`) | **live proxy (with `--policy`)** | ALLOW / **DENY** / DENY (budget) | The 1st allowed-prefix write ALLOWs, the 2nd and 3rd DENY on budget — because the earlier constraint-denied `/etc` write (row b) already consumed a budget slot. Demonstrated on the real `write_file` tool (no delete tool exists). |
 | d | sink gate (exfiltrating send + tainted output) | **direct engine** (+ automated suite) | ALLOW / **DENY** / ASK | Filesystem server has no send tool — see Reconciliation. |
 
 **The two findings and the bug reproduced in the first run are now FIXED and
@@ -228,6 +228,27 @@ Real proxy audit log (`~/.bouncer/audit.jsonl`) for this run, verbatim:
 {"tool": "write_file", "args": {"path": ".../out/note2.txt", "content": "ok"}, "verdict": "deny", "reason": "call budget 2 for 'write_file' exceeded", "contract": "budget"}
 {"tool": "write_file", "args": {"path": ".../out/note3.txt", "content": "ok"}, "verdict": "deny", "reason": "call budget 2 for 'write_file' exceeded", "contract": "budget"}
 ```
+
+**This is not a clean "2 allowed, then a 3rd denied" budget demo.** The engine's
+`_check_budget` runs *before* `_check_constraints`, and the budget counter
+increments on every call that reaches it — regardless of the eventual verdict.
+So the constraint-denied `/etc` write above (call attempt #1 against
+`write_file`) already consumed one of the two budget slots. The four calls to
+`write_file` in this run, in order, were:
+
+1. `/etc/...` — DENIED by **constraint** (outside allowed prefixes), but this
+   attempt still incremented the `write_file` budget counter to 1.
+2. `note1.txt` — budget counter now 2, still `<= max_calls=2`, so it's
+   **ALLOWED**.
+3. `note2.txt` — budget counter would be 3, over `max_calls=2`, so it's
+   **DENIED by budget**. This is the *second* allowed-prefix write, not the
+   third.
+4. `note3.txt` — also **DENIED by budget** for the same reason.
+
+So only one allowed-prefix write (`note1.txt`) ever gets through, not two. The
+practical takeaway: budgets count *attempts*, including calls denied by other
+contracts — the conservative/fail-safe choice, since it means a denied call
+still "costs" quota rather than being free to retry indefinitely.
 
 **DENY-never-forwards confirmed live:** only `note1.txt` exists on disk after the
 run; `note2.txt`/`note3.txt` (both budget-DENY) were never written, i.e. the
