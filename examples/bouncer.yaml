@@ -2,11 +2,16 @@
 #   bouncer run --config <mcp config> --upstream-name <server> --policy bouncer.yaml
 #
 # A user policy is layered on top of the builtin packs (src/bouncer/packs/*.yaml)
-# and wins on any tool name it also defines. Tool and param names below are
+# and REPLACES (does not merge with) the pack entry for any tool it defines.
+# So a per-tool override must restate exfiltrating/sink_params — omitting them
+# turns the sink gate OFF for that tool. Tool and param names below are
 # illustrative — confirm the real tool/arg names your upstream server exposes
 # (e.g. via its tools/list) before relying on this in production.
 
 send_email:
+  # exfiltrating + sink_params are REQUIRED here even though the gmail pack
+  # already sets them: a user entry replaces the pack entry wholesale, so
+  # dropping these would silently disable the sink gate for send_email.
   exfiltrating: true
   sink_params: [to, cc, bcc]
   trusted_destinations: [you@yourcompany.com]   # your own always-ok recipients

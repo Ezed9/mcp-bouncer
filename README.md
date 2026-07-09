@@ -39,10 +39,12 @@ enforced by `tests/test_proxy.py`).
 Four deterministic contract types, checked in this order (`ContractEngine._decide`,
 `bouncer/src/bouncer/engine.py`):
 
-1. **Schema pinning (rug-pull guard).** Every upstream tool's schema is
-   recorded at startup. A tool call for a name the proxy never saw (or whose
-   schema changed mid-session) is unknown — `ask` (fails closed to `deny`
-   without elicitation).
+1. **Schema pinning (rug-pull guard).** Every upstream tool is recorded at
+   startup. A tool call for a name that was **not pinned at startup** (e.g. a
+   tool the server added mid-session) is unknown — `ask`, which fails closed to
+   `deny` since a pinning `ask` has no destination a human can vouch for.
+   (Detecting a *changed* schema for an already-pinned name is a
+   [documented limit](#documented-limits), not implemented in v1.)
 2. **Call budgets.** `max_calls` per tool per session. **Budgets count
    attempts, not successes** — the counter increments on every call that
    reaches the budget check, including one later denied by a different
@@ -61,8 +63,9 @@ Four deterministic contract types, checked in this order (`ContractEngine._decid
    destination: a pack/YAML allowlist entry, or a remembered human approval.
    An exfiltrating tool with *no* declared sink args treats every argument as
    a sink (fail-closed — a forgotten declaration can't leave a hole).
-   - A destination that traces back to untrusted tool output (an email body,
-     a file's contents, …) is **tainted** → `deny`.
+   - A destination that traces back to untrusted output of a tool **on the same
+     wrapped server** (an email body, a document's contents, …) is **tainted** →
+     `deny`. (Taint is per-server — see [documented limits](#documented-limits).)
    - A destination that is neither trusted nor traceably tainted is
      **unproven** → `ask`.
    - List-valued sinks (e.g. multiple `cc` recipients) are classified
@@ -92,6 +95,13 @@ A malformed policy file (top-level YAML that isn't a tool-name mapping, or an
 invalid regex in `arg_patterns`) **fails closed**: `load_policies` /
 `_policy_from_dict` raise `PolicyError` rather than silently ignoring the
 file.
+
+> **A user entry *replaces* the pack entry for that tool — it does not merge.**
+> If you override `send_email` to add a `trusted_destinations` allowlist, you
+> must also restate `exfiltrating: true` and its `sink_params`, or you silently
+> turn the sink gate **off** for that tool. Copy the tool's block from the pack
+> (`bouncer/src/bouncer/packs/*.yaml`) and add to it. See
+> [`examples/bouncer.yaml`](examples/bouncer.yaml).
 
 ## Install and use
 
@@ -142,10 +152,10 @@ Every verdict — `allow`, `deny`, and `ask` — is appended as one JSON line to
 ```
 
 This is a real line captured during the manual smoke test — see
-[`docs/manual-smoke.md`](docs/manual-smoke.md) for the full run. (One nuance:
-after a human approves an `ask`, the proxy doesn't write a second audit line
-for the approval itself — the approval shows up as the *next* call to that
-destination resolving to `allow`.)
+[`docs/manual-smoke.md`](docs/manual-smoke.md) for the full run. When a human
+approves an `ask`, the same client call re-evaluates and immediately writes its
+`allow` line, so an approved send appears in the log as an `ask` line followed
+by an `allow` line for the same call.
 
 ## Demo: allow, then deny, for real
 
@@ -153,15 +163,38 @@ This is real output, not a mockup. It's the exact transcript captured during
 the live smoke test against the official
 `@modelcontextprotocol/server-filesystem` reference server on 2026-07-06 (see
 [`docs/manual-smoke.md`](docs/manual-smoke.md) for the full run, environment,
-and audit log). Reproduce it yourself:
+and audit log).
+
+To reproduce on your machine, create a work dir with an MCP config and a user
+policy, wrap it, and drive it (the helper scripts under
+[`scripts/`](scripts/) are the exact ones used — point them at your paths):
 
 ```bash
-cd bouncer
+cd bouncer && uv sync
 mkdir -p smoke_work/out
-uv run bouncer init --config smoke_work/mcp-config.json   # wrap the server
-uv run python scripts/smoke_driver_policy.py              # drive it as a client
+
+# an MCP config that runs the reference filesystem server over your work dir:
+cat > smoke_work/mcp-config.json <<'JSON'
+{"mcpServers": {"filesystem": {"command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "<ABS>/smoke_work"]}}}
+JSON
+
+# a user policy: confine writes to ./out and cap write_file at 2 calls:
+cat > smoke_work/user-policy.yaml <<'YAML'
+write_file:
+  write_params: [path]
+  allowed_path_prefixes: ["<ABS>/smoke_work/out"]
+  max_calls: 2
+YAML
+
+# replace <ABS> with the absolute path to bouncer/, then:
+uv run bouncer init --config smoke_work/mcp-config.json
+uv run python scripts/smoke_driver_policy.py   # drives it as a scripted client
 cat ~/.bouncer/audit.jsonl
 ```
+
+The `smoke_work/` dir is intentionally **not** committed (its paths are
+machine-specific); create it as above.
 
 Real per-call output from that run, with a user policy
 (`allowed_path_prefixes: [".../smoke_work/out"]`, `max_calls: 2` on
@@ -214,6 +247,20 @@ canned capture.
 - **Doesn't make the agent's plan smart.** Contracts bound what the agent may
   do, not whether its plan is a good idea. A denied call is safe, not
   necessarily corrected.
+- **Taint is per wrapped server.** Each `bouncer run` wraps one server with its
+  own taint tracker, so a *cross-server* flow — read a poisoned file via one
+  server, then send via another — surfaces as `ask` (unproven destination), not
+  `deny`. Deny-unless-trusted still holds (nothing is silently allowed), but the
+  hard `deny` only fires when the tainted data and the send go through the same
+  wrapped server.
+- **Path confinement is lexical.** Prefix checks collapse `.`/`..` but do not
+  resolve symlinks, so a symlink placed inside an allowed prefix could point
+  outside it. Don't rely on path confinement alone against an adversary who can
+  create symlinks in the allowed directory.
+- **No mid-session schema-change detection (v1).** Schemas are pinned once at
+  startup; a server that changes an *already-pinned* tool's schema mid-session
+  is not re-checked. Only names absent from the startup snapshot are treated as
+  unknown.
 
 ## Benchmark
 

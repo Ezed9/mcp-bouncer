@@ -432,8 +432,9 @@ above), so the deny-unless-trusted sink gate cannot be shown against it. No fake
 ```bash
 cd /Users/nishit/Desktop/Projects/Fable/bouncer
 mkdir -p smoke_work/out
-# (config + init already committed under smoke_work/ are throwaway; re-init a
-#  fresh unwrapped config if you want to see the init diff again.)
+# (smoke_work/ is NOT committed — its paths are machine-specific. Create
+#  smoke_work/mcp-config.json and smoke_work/user-policy.yaml as shown in the
+#  README's "Demo" section, then run bouncer init against the config.)
 
 # Live proxy exercise (produces ~/.bouncer/audit.jsonl):
 uv run python scripts/smoke_driver.py

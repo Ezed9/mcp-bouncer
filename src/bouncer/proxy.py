@@ -14,6 +14,7 @@ async part.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -296,9 +297,16 @@ class BouncerProxy:
     async def _forward_and_record(
         self, forward: Callable[[], Awaitable[mcp_types.CallToolResult]]
     ) -> mcp_types.CallToolResult:
-        """Forward upstream, feed the TEXT to taint, and relay the full result."""
+        """Forward upstream, feed the output to taint, and relay the full result.
+
+        Both text blocks AND structuredContent are recorded as untrusted: modern
+        servers return destinations (emails, urls) only via structuredContent, so
+        ignoring it would blind the taint tracker to those values.
+        """
         result = await forward()
         self._engine.register_output(_result_text(result))
+        if result.structuredContent is not None:
+            self._engine.register_output(json.dumps(result.structuredContent, default=str))
         return result
 
     def _make_elicit(self, ctx: object) -> AsyncElicit:
