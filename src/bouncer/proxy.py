@@ -81,12 +81,17 @@ def route_call(
             return result, Verdict.ALLOW
         if decision.verdict is Verdict.DENY:
             return f"[bouncer blocked] {decision.reason}", Verdict.DENY
+        # A pinning ASK (ask_key is None) has no destination to vouch for, so a
+        # human answer can't resolve it — deny without a pointless elicit round.
+        if decision.ask_key is None:
+            return f"[bouncer blocked] {decision.reason}", Verdict.DENY
         # ASK: ask the human about this specific destination.
         approved = elicit(decision.reason)
-        if not approved or decision.ask_key is None:
+        if not approved:
             return f"[bouncer blocked] {decision.reason}", Verdict.DENY
         engine.on_approved(decision.ask_key)
-        decision = engine.evaluate(call)
+        # count_budget=False: a re-eval within one client call must not re-spend.
+        decision = engine.evaluate(call, count_budget=False)
 
     # Loop exhausted without resolving (defensive; shouldn't happen given the
     # strict-progress bound). Fail closed.
@@ -156,12 +161,19 @@ class BouncerProxy:
         upstream_args: list[str] | None = None,
         server_name: str = "bouncer",
         user_policy: Path | None = None,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
     ) -> None:
         """Connect the upstream, pin its schemas, build the engine, and serve.
 
         `upstream_command`/`upstream_args` are the launch command for the
         upstream stdio MCP server (the CLI in Task 12 supplies these from its
         config). We stay connected for the whole session.
+
+        `env`/`cwd`, if given, are passed straight through to the upstream
+        subprocess (recovered from the wrapped config's stashed original entry
+        -- credentials for servers like github/gmail/slack live in `env`).
+        `None` preserves the prior behaviour (inherit the parent's env, cwd).
 
         `user_policy`, if given, is a user contract YAML layered as the
         highest-priority override over the builtin packs (see
@@ -170,6 +182,8 @@ class BouncerProxy:
         params = StdioServerParameters(
             command=upstream_command,
             args=upstream_args or [],
+            env=env,
+            cwd=cwd,
         )
         async with AsyncExitStack() as stack:
             read, write = await stack.enter_async_context(stdio_client(params))
@@ -269,11 +283,13 @@ class BouncerProxy:
                 return await self._forward_and_record(forward), Verdict.ALLOW
             if decision.verdict is Verdict.DENY:
                 return _denied_result(decision.reason), Verdict.DENY
+            if decision.ask_key is None:
+                return _denied_result(decision.reason), Verdict.DENY
             approved = await elicit(decision.reason)
-            if not approved or decision.ask_key is None:
+            if not approved:
                 return _denied_result(decision.reason), Verdict.DENY
             self._engine.on_approved(decision.ask_key)
-            decision = self._engine.evaluate(call)
+            decision = self._engine.evaluate(call, count_budget=False)
 
         return _denied_result(decision.reason), Verdict.DENY
 

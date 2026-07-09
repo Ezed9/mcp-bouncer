@@ -65,22 +65,22 @@ class ContractEngine:
     def on_approved(self, key: str) -> None:
         self._approvals.approve(key)
 
-    def evaluate(self, call: ToolCall) -> Decision:
-        decision = self._decide(call)
+    def evaluate(self, call: ToolCall, *, count_budget: bool = True) -> Decision:
+        decision = self._decide(call, count_budget)
         self._audit.write(AuditEntry(
             tool=call.tool, args=call.args, verdict=decision.verdict.value,
             reason=decision.reason, contract=decision.contract,
         ))
         return decision
 
-    def _decide(self, call: ToolCall) -> Decision:
+    def _decide(self, call: ToolCall, count_budget: bool = True) -> Decision:
         schema = self._schemas.get(call.tool)
         if schema is None:
-            return Decision(Verdict.ASK, "unknown or changed tool schema", "pinning")
+            return Decision(Verdict.ASK, "unknown tool (not pinned at startup)", "pinning")
 
         policy = self._resolver.policy_for(call.tool, schema)
 
-        budget = self._check_budget(call.tool, policy)
+        budget = self._check_budget(call.tool, policy, count_budget)
         if budget is not None:
             return budget
 
@@ -94,8 +94,14 @@ class ContractEngine:
 
         return Decision(Verdict.ALLOW, "", "default")
 
-    def _check_budget(self, tool: str, policy: ToolPolicy) -> Decision | None:
+    def _check_budget(
+        self, tool: str, policy: ToolPolicy, count_budget: bool = True
+    ) -> Decision | None:
         if policy.max_calls is None:
+            return None
+        # A re-evaluation within one client call's ASK approval loop must not
+        # re-consume a slot; the first evaluate of the call already counted it.
+        if not count_budget:
             return None
         self._counts[tool] = self._counts.get(tool, 0) + 1
         if self._counts[tool] > policy.max_calls:

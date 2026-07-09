@@ -1,14 +1,15 @@
 # bouncer/src/bouncer/cli.py
 """CLI: `bouncer init` (wrap servers in a client config) and `bouncer run`.
 
-`rewrite_config` is pure and idempotent -- it stashes the original launch
-command under an `x-bouncer-upstream` sentinel and points the server entry at
+`rewrite_config` is pure and idempotent -- it stashes the ENTIRE original
+server entry (command, args, and anything else on it -- `env`, `cwd`, ...)
+under an `x-bouncer-upstream` sentinel and points the server entry at
 `bouncer run`. Re-running is a no-op because the sentinel is detected.
 
 `_upstream_from_config` is the pure inverse: given a config and a server name,
-it recovers the original `{command, args}` from the sentinel so `run` can
-relaunch the real upstream. main() holds no decision logic; it is I/O +
-argument plumbing only.
+it recovers the original `(command, args, env, cwd)` from the sentinel so
+`run` can relaunch the real upstream with its credentials/env intact. main()
+holds no decision logic; it is I/O + argument plumbing only.
 """
 
 from __future__ import annotations
@@ -37,7 +38,10 @@ def rewrite_config(
     entry = servers[server_name]
     if not isinstance(entry, dict) or _SENTINEL in entry:
         return out  # already wrapped -> idempotent no-op
-    original = {"command": entry.get("command"), "args": entry.get("args", [])}
+    # Stash the WHOLE original entry -- not just {command, args} -- so `env`,
+    # `cwd`, and any other keys (credentials for github/gmail/slack upstreams)
+    # survive the wrap and can be recovered by `_upstream_from_config`.
+    original = entry
     servers[server_name] = {
         "command": command,
         "args": args,
@@ -48,8 +52,11 @@ def rewrite_config(
 
 def _upstream_from_config(
     config: dict[str, object], server_name: str
-) -> tuple[str, list[str]]:
-    """Recover the original upstream `(command, args)` from the sentinel.
+) -> tuple[str, list[str], dict[str, str] | None, str | None]:
+    """Recover the original upstream `(command, args, env, cwd)` from the sentinel.
+
+    `env`/`cwd` are `None` when the original entry didn't set them (backward
+    compatible with configs wrapped before this existed).
 
     Raises `ValueError` if the server is missing or was never wrapped by
     `rewrite_config` -- `run` has nothing to relaunch in that case.
@@ -66,9 +73,16 @@ def _upstream_from_config(
     original = entry[_SENTINEL]
     command = original.get("command")
     args = original.get("args", [])
+    env = original.get("env")
+    cwd = original.get("cwd")
     if not isinstance(command, str):
         raise ValueError(f"server {server_name!r} sentinel is missing a command")
-    return command, list(args)
+    return (
+        command,
+        list(args),
+        dict(env) if isinstance(env, dict) else None,
+        cwd if isinstance(cwd, str) else None,
+    )
 
 
 def _cmd_init(config_path: Path, server_names: list[str]) -> int:
@@ -97,11 +111,11 @@ def _cmd_run(
     config_path: Path, server_name: str, user_policy: Path | None = None
 ) -> int:
     config = json.loads(config_path.read_text())
-    command, args = _upstream_from_config(config, server_name)
+    command, args, env, cwd = _upstream_from_config(config, server_name)
 
     from .proxy import BouncerProxy  # deferred: avoids importing MCP for `init`
 
-    anyio.run(BouncerProxy.serve, command, args, server_name, user_policy)
+    anyio.run(BouncerProxy.serve, command, args, server_name, user_policy, env, cwd)
     return 0
 
 

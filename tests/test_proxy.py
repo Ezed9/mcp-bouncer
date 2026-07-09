@@ -236,6 +236,69 @@ async def proxy_route(eng, fake_forward):
     )
 
 
+def test_route_ask_approve_consumes_single_budget_slot(tmp_path: Path) -> None:
+    # I1: the re-eval loop used to call engine.evaluate() again after every
+    # approval, and `_check_budget` increments unconditionally on every
+    # evaluate -- so ONE client call that goes ASK -> approve -> ALLOW
+    # consumed TWO budget slots. Fix: only the first evaluate of a client call
+    # counts against the budget; re-evals after approval must not.
+    pol = ToolPolicy(
+        name="send_email", exfiltrating=True, sink_params=("to",), max_calls=2,
+    )
+    eng = _engine(tmp_path, pol)
+
+    def fake_forward(_c: ToolCall) -> str:
+        return "sent"
+
+    text, verdict = route_call(
+        eng,
+        ToolCall("send_email", {"to": "bob@partner.com"}),
+        forward=fake_forward,
+        elicit=lambda _m: True,
+    )
+    assert verdict == Verdict.ALLOW
+    assert eng._counts["send_email"] == 1  # one client call == one budget slot
+
+    # A second, distinct approved call must still succeed -- budget is 2, and
+    # only 1 slot has been consumed so far.
+    text2, verdict2 = route_call(
+        eng,
+        ToolCall("send_email", {"to": "carol@partner.com"}),
+        forward=fake_forward,
+        elicit=lambda _m: True,
+    )
+    assert verdict2 == Verdict.ALLOW
+    assert eng._counts["send_email"] == 2
+
+
+def test_route_pinning_ask_never_elicits_and_denies(tmp_path: Path) -> None:
+    # Batched fix: a pinning ASK (unknown tool, decision.ask_key is None) can
+    # never be resolved by human approval -- there's no destination to vouch
+    # for -- so the loop must deny immediately WITHOUT round-tripping to
+    # elicit at all.
+    eng = ContractEngine(
+        resolver=PolicyResolver(overrides={}),
+        taint=TaintTracker(),
+        approvals=ApprovalStore(),
+        audit=AuditLog(tmp_path / "a.jsonl"),
+        schemas={},  # "mystery" was never pinned at startup
+    )
+    elicited = {"called": False}
+
+    def fake_elicit(_msg: str) -> bool:
+        elicited["called"] = True
+        return True  # even if "approved", a pinning ASK still must deny
+
+    text, verdict = route_call(
+        eng,
+        ToolCall("mystery", {"x": "y"}),
+        forward=lambda _c: "should never run",
+        elicit=fake_elicit,
+    )
+    assert verdict == Verdict.DENY
+    assert elicited["called"] is False
+
+
 def test_build_resolver_layers_user_policy_over_packs(tmp_path: Path) -> None:
     # Fix 2: a user YAML must beat the builtin packs. The filesystem pack ships
     # write_file with allowed_path_prefixes: []; a user policy setting a prefix

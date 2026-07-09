@@ -73,9 +73,54 @@ def test_upstream_from_config_extracts_original_command() -> None:
             }
         }
     }
-    command, args = _upstream_from_config(cfg, "fs")
+    command, args, env, cwd = _upstream_from_config(cfg, "fs")
     assert command == "npx"
     assert args == ["-y", "server-fs", "/data"]
+    assert env is None
+    assert cwd is None
+
+
+def test_rewrite_preserves_env_and_cwd_under_sentinel() -> None:
+    # C1: an mcpServers entry carrying `env` (credentials) and `cwd` must not be
+    # dropped by wrapping -- only {command, args} used to be stashed, silently
+    # deleting secrets/cwd needed to relaunch the real upstream (github/gmail/
+    # slack servers all rely on `env` for tokens).
+    cfg = {
+        "mcpServers": {
+            "gh": {
+                "command": "npx",
+                "args": ["-y", "server-github"],
+                "env": {"TOKEN": "secret"},
+                "cwd": "/some/dir",
+            }
+        }
+    }
+    out = rewrite_config(cfg, "gh", command="bouncer", args=["run"])
+    gh = out["mcpServers"]["gh"]
+    assert gh["x-bouncer-upstream"] == {
+        "command": "npx",
+        "args": ["-y", "server-github"],
+        "env": {"TOKEN": "secret"},
+        "cwd": "/some/dir",
+    }
+
+    command, args, env, cwd = _upstream_from_config(out, "gh")
+    assert command == "npx"
+    assert args == ["-y", "server-github"]
+    assert env == {"TOKEN": "secret"}
+    assert cwd == "/some/dir"
+
+
+def test_rewrite_is_idempotent_with_env_present() -> None:
+    cfg = {
+        "mcpServers": {
+            "gh": {"command": "npx", "args": ["x"], "env": {"TOKEN": "secret"}}
+        }
+    }
+    once = rewrite_config(cfg, "gh", command="bouncer", args=["run"])
+    twice = rewrite_config(once, "gh", command="bouncer", args=["run"])
+    assert once == twice
+    assert once["mcpServers"]["gh"]["x-bouncer-upstream"]["env"] == {"TOKEN": "secret"}
 
 
 def test_upstream_from_config_raises_when_not_wrapped() -> None:
