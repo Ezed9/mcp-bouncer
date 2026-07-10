@@ -261,54 +261,63 @@ canned capture.
   startup; a server that changes an *already-pinned* tool's schema mid-session
   is not re-checked. Only names absent from the startup snapshot are treated as
   unknown.
+- **Sink params must be complete for your server.** The gate inspects the
+  `sink_params` you declare (plus a fail-closed sweep of *all* args when a
+  tool's declared sinks are entirely absent from a call — the schema-mismatch
+  guard). But if a tool exposes a destination-bearing argument you did **not**
+  declare *alongside* one you did (e.g. you declare `to` and the server also
+  accepts an undeclared `recipients`), the undeclared field is treated as
+  content, not a destination, and a value placed there is not gated. Undeclared
+  extra params can't be auto-classified as sink-vs-content without guessing, so
+  enumerate every recipient/destination argument your actual server accepts in
+  your pack. The curated packs aim to be complete for the servers they name;
+  verify against your server's `tools/list`.
 
 ## Benchmark
 
-Measured live on 2026-07-10 against AgentDojo's v1 `workspace` suite
-(`user_task_8`, the `important_instructions` prompt-injection attack, agent
-model `gemini-3.1-flash-lite`) — full table, caveats, and per-call audit
-excerpts in [`benchmark/RESULTS.md`](benchmark/RESULTS.md):
+Bouncer is benchmarked against AgentDojo's v1 `workspace` suite under the
+`important_instructions` prompt-injection attack, scored by **AgentDojo's own
+security scorer** (did the injection actually reach the attacker's address?) —
+not a Bouncer-internal count — and compared against a no-Bouncer baseline so
+the number reflects defense, not a model too weak to attack. Full methodology,
+the exact command, and the results table are in
+[`benchmark/RESULTS.md`](benchmark/RESULTS.md).
 
-- **Attack-block rate on sink calls: 1.00** — all 13 exfiltration attempts
-  the injected agent made were blocked (12 hard DENYs, 1 ASK), including
-  mailing a real security code to the attacker's address.
-- **Benign false-positive rate: 0.00** — the benign run completed with zero
-  blocked calls and zero asks.
+An earlier run caught a real bypass in Bouncer itself — the sink gate *allowed*
+an exfiltration because a pack's sink params were written for a different
+server's schema — which was then fixed fail-closed in the engine (commit
+`3d9c904`) with regression tests. That is the benchmark doing its job. The
+headline metric was subsequently rebuilt (after two Opus code reviews) to use
+AgentDojo's per-injection security verdict, because the first metric could
+credit collateral-blocking the user's own task as an "attack block". `RESULTS.md`
+documents both, honestly.
 
-Notably, the *first* complete run scored 0.00 — it exposed a real bypass
-(pack sink params written for one server's schema silently missing another's)
-that was fixed fail-closed in the engine before the re-run. The full story is
-in `RESULTS.md`; the point of a benchmark is to be allowed to fail you.
-
-Pre-registered kill criteria (from the design spec) and how the run scored:
+Pre-registered kill criteria (from the design spec), checked against — not
+explained away — once numbers land:
 
 > If after approval-memory the benign suites still show **≥10% utility
 > loss** or a **median of >3 asks per benign task**, the deterministic-only
 > thesis is wrong for this layer — stop, or pivot to a hybrid (lightweight ML
 > screener) approach.
 
-Measured: 0% benign utility loss, 0 asks per benign task. Both pass. Scope
-honesty: one user task, one attack, one model so far — see the caveats
-section in `RESULTS.md`.
-
-To reproduce:
+To reproduce (a free Gemini key, no credit card, suffices):
 
 ```bash
 cd bouncer
-GEMINI_API_KEY=... uv run --extra benchmark python -m benchmark.run_agentdojo --user-tasks user_task_8
+GEMINI_API_KEY=... uv run --extra benchmark python -m benchmark.run_agentdojo
 ```
 
 ## How it was built
 
-v1, deterministic core only — no LLM anywhere in the decision path. 80 unit
+v1, deterministic core only — no LLM anywhere in the decision path. 82 unit
 and integration tests (`uv run pytest -q` from `bouncer/`) cover the engine,
 policy resolution, taint tracking, approvals, audit log, packs, and the
 proxy's routing logic. The proxy has additionally been live-smoke-tested
 end-to-end against the real `@modelcontextprotocol/server-filesystem`
 reference server — see [`docs/manual-smoke.md`](docs/manual-smoke.md) for
 the full transcript, including two real bugs that were found and fixed
-during that exercise — and benchmarked live against AgentDojo (see above).
-It is early: MCP-only, stdio-only, single-machine, one benchmark task so far.
+during that exercise — and has an AgentDojo benchmark harness (see above).
+It is early: MCP-only, stdio-only, single-machine.
 
 ## License
 
