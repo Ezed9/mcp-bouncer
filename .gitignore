@@ -1,0 +1,12 @@
+# regenerated on every benchmark run (audit.jsonl also captures local data)
+benchmark/audit.jsonl
+benchmark/logs/
+
+# local smoke-test scratch (contains machine-specific absolute paths)
+smoke_work/
+
+__pycache__/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
