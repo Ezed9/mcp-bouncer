@@ -22,6 +22,28 @@ been exercised live, end-to-end, against the reference filesystem MCP server
 (see [`docs/manual-smoke.md`](docs/manual-smoke.md)). It is MCP-only — read
 [Documented limits](#documented-limits) before you rely on it.
 
+## How it decides
+
+Every tool call runs the same deterministic gauntlet — no model, no scoring.
+The sink gate is the novel part: it is **deny-unless-trusted on the
+_destination_**, keyed to where the value came from.
+
+```mermaid
+flowchart TD
+    call[Tool call from agent] --> pin{Known / pinned tool?}
+    pin -- no --> ask[["ASK a human"]]
+    pin -- yes --> bud{Within call budget?}
+    bud -- no --> deny[["DENY (never forwarded)"]]
+    bud -- yes --> con{Arg constraints pass?}
+    con -- no --> deny
+    con -- yes --> sink{Exfiltrating tool?}
+    sink -- no --> allow[["ALLOW → forward upstream"]]
+    sink -- yes --> trust{Where did the destination come from?}
+    trust -- "tainted (untrusted tool output)" --> deny
+    trust -- "unproven" --> ask
+    trust -- "trusted (pack allowlist or remembered approval)" --> allow
+```
+
 ## The three verdicts
 
 Every tool call resolves to exactly one of:
