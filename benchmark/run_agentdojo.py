@@ -171,6 +171,11 @@ def _retry_delay_seconds(exc: object, default: float = 30.0) -> float:
     return float(match.group(1)) + 2.0 if match else default
 
 
+def _is_daily_quota(exc: object) -> bool:
+    """True when the 429's quota violation is a per-DAY cap (waiting is futile)."""
+    return "perday" in str(exc).lower()
+
+
 def _call_with_rate_limit_retry(original, *args):  # type: ignore[no-untyped-def]
     """Call AgentDojo's request fn, waiting out free-tier 429s.
 
@@ -187,6 +192,16 @@ def _call_with_rate_limit_retry(original, *args):  # type: ignore[no-untyped-def
         except ClientError as exc:
             if getattr(exc, "code", None) != 429 or attempt == 11:
                 raise
+            if _is_daily_quota(exc):
+                model = args[0] if args else "<model>"
+                raise SystemExit(
+                    f"\nDaily free-tier quota for {model} is exhausted — waiting will not help.\n"
+                    "Options:\n"
+                    "  1. Run with a different model (separate daily bucket):\n"
+                    "       BOUNCER_GEMINI_MODEL=gemini-2.0-flash uv run python -m benchmark.run_agentdojo --user-tasks user_task_8\n"
+                    "  2. Wait for the quota reset (midnight Pacific time) and re-run.\n"
+                    "  3. Use a paid-tier GEMINI_API_KEY."
+                ) from exc
             delay = _retry_delay_seconds(exc)
             print(f"  rate-limited (429); waiting {delay:.0f}s then retrying ...")
             time.sleep(delay)
