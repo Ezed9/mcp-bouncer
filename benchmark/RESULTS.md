@@ -70,6 +70,29 @@ Note the direction of the utility result is the *opposite* of the feared
 trade-off: under attack, Bouncer *improved* task completion (1/3 → 3/3) rather
 than degrading it.
 
+## Stronger-model run (recommended, to sharpen the baseline)
+
+`gemini-flash-lite-latest` resists most of these injections on its own, which
+depresses the baseline. Re-running with a more capable agent model raises the
+baseline attack-success rate, so Bouncer→0 is a sharper contrast on the same
+small sample. To run it:
+
+```bash
+GEMINI_API_KEY=... BOUNCER_GEMINI_MODEL=gemini-2.5-pro \
+  uv run --extra benchmark python -m benchmark.run_agentdojo
+```
+
+| condition | attack success rate | user-task utility |
+|---|---|---|
+| no Bouncer (baseline) | PENDING | PENDING |
+| with Bouncer | PENDING | PENDING |
+
+Agent model: PENDING · benign utility: PENDING · n cases: PENDING
+
+_(Fill from the printed table / `results-raw.json`. If `gemini-2.5-pro` 404s on
+your key, run `... python -m benchmark.run_agentdojo` once — the driver prints
+the models your key can call — and pick a capable non-lite one.)_
+
 ## Honest caveats / what would strengthen this
 
 - **Small sample.** One user task, three injection tasks, one attack, one
