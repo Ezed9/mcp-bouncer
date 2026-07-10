@@ -164,27 +164,42 @@ _thinking_patched = False
 
 
 def _disable_gemini_thinking(google_llm_module: object) -> None:
-    """Force thinking off in AgentDojo's Gemini calls.
-
-    Thinking-enabled Gemini models (2.5+/3.x flash) now require a
-    `thought_signature` to be echoed back on every function-call part across
-    turns. AgentDojo's bundled GoogleLLM predates that requirement and doesn't
-    round-trip it, so multi-turn tool use fails with a 400 INVALID_ARGUMENT.
-    Disabling thinking (`thinking_budget=0`) sidesteps the signature requirement
-    entirely and keeps function calling working on the free tier. We patch the
-    module's `chat_completion_request` (which `GoogleLLM.query` calls) rather
-    than editing site-packages, so the fix ships with this repo.
-    """
+    """Preserve Gemini thought signatures across AgentDojo tool-call turns."""
     global _thinking_patched
     if _thinking_patched:
         return
-    from google.genai import types as genai_types
 
     original = google_llm_module.chat_completion_request
+    pending_signatures = []
 
-    def patched(model, client, contents, generation_config):  # type: ignore[no-untyped-def]
-        generation_config.thinking_config = genai_types.ThinkingConfig(thinking_budget=0)
-        return original(model, client, contents, generation_config)
+    def patched(model, client, contents, generation_config):
+        # AgentDojo reconstructs assistant function-call parts and drops
+        # Gemini's thought_signature. Restore signatures in original order.
+        signature_index = 0
+        for content in contents:
+            for part in content.parts or []:
+                if part.function_call is not None:
+                    if (
+                        getattr(part, "thought_signature", None) is None
+                        and signature_index < len(pending_signatures)
+                    ):
+                        part.thought_signature = pending_signatures[signature_index]
+                    signature_index += 1
+
+        response = original(model, client, contents, generation_config)
+
+        # Save signatures returned with function calls for the next turn.
+        if response.candidates:
+            content = response.candidates[0].content
+            if content is not None:
+                for part in content.parts or []:
+                    if (
+                        part.function_call is not None
+                        and getattr(part, "thought_signature", None) is not None
+                    ):
+                        pending_signatures.append(part.thought_signature)
+
+        return response
 
     google_llm_module.chat_completion_request = patched
     _thinking_patched = True
@@ -202,12 +217,23 @@ def _build_pipeline(engine: ContractEngine, records: list[_CallRecord], pack_too
     _disable_gemini_thinking(google_llm)
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    llm = GoogleLLM("gemini-3.5-flash", client=client)
+    # gemini-3.5-flash's free tier is only 20 requests/DAY, and one AgentDojo
+    # task makes many calls — so it 429s almost immediately. Default to
+    # gemini-2.5-flash (a far larger free-tier quota, separate bucket); override
+    # with BOUNCER_GEMINI_MODEL for a paid key or a different model.
+    model = os.environ.get("BOUNCER_GEMINI_MODEL", "gemini-2.5-flash")
+    llm = GoogleLLM(model, client=client)
     system_message = SystemMessage(load_system_message(None))
     init_query = InitQuery()
     tools_loop = ToolsExecutionLoop([_make_recording_tools_executor(engine, records, pack_tools), llm])
     pipeline = AgentPipeline([system_message, init_query, llm, tools_loop])
-    pipeline.name = "AI model developed by Google"
+    # AgentDojo's attack loader (get_model_name_from_pipeline) resolves the model
+    # by finding a known model-id KEY as a substring of pipeline.name, then uses
+    # its prose label ("AI model developed by Google") to address the model in
+    # the injection. Our real model (gemini-3.5-flash) isn't in AgentDojo's map,
+    # so we label the pipeline with a known Google key that maps to the same
+    # prose name — the attack is addressed identically.
+    pipeline.name = "gemini-2.0-flash-001"
     return pipeline
 
 
