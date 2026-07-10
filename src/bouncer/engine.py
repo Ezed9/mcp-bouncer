@@ -141,6 +141,12 @@ class ContractEngine:
         # arg as a destination, so a forgotten declaration can never leave a sink
         # unguarded.
         sinks = policy.sink_params or tuple(call.args.keys())
+        # Fail-closed again: declared sinks that are ALL absent from this call
+        # mean the policy was written for a different schema (e.g. `to=` vs
+        # `recipients=`) and the real destination is invisible — treat every
+        # arg as a sink rather than silently allowing an unseen destination.
+        if not any(param in call.args for param in sinks):
+            sinks = tuple(call.args.keys())
 
         pending_ask: Decision | None = None
         for param in sinks:

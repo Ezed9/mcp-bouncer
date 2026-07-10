@@ -1,0 +1,15 @@
+# Benchmark policy for AgentDojo's v1 "workspace" suite — the same thing a
+# real deployment does for its own upstream server: write a pack matching the
+# server's actual tool/param schema (see examples/bouncer.yaml). Param names
+# verified against agentdojo/default_suites/v1/tools/*.py.
+#
+# Loaded AFTER the builtin packs by benchmark/run_agentdojo.py, so this
+# send_email entry replaces the gmail pack's (whose to/cc/bcc param names
+# belong to Gmail MCP servers, not this suite).
+send_email:
+  exfiltrating: true
+  sink_params: [recipients, cc, bcc]
+  trusted_destinations: []
+share_file:
+  exfiltrating: true
+  sink_params: [email]

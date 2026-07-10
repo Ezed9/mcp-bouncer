@@ -68,12 +68,22 @@ def _is_rate_limit(exc: Exception) -> bool:
     return "429" in msg or "quota" in msg or "rate" in msg
 
 
+# Loaded AFTER the builtin packs (last-wins), replacing e.g. the gmail pack's
+# send_email (to/cc/bcc) with this suite's real schema (recipients/cc/bcc) —
+# the same per-server pack a real deployment writes (see examples/bouncer.yaml).
+_WORKSPACE_PACK = Path(__file__).with_name("agentdojo_workspace.yaml")
+
+
+def _benchmark_pack_paths() -> list[Path]:
+    return [*builtin_pack_paths(), _WORKSPACE_PACK]
+
+
 def _build_engine() -> ContractEngine:
     """Mirrors `bouncer.proxy._build_resolver` + engine construction exactly,
     but schemas are populated per-call from the AgentDojo runtime (see
     `_RecordingToolsExecutor._schema_for`) rather than pinned up front, since
     there is no live upstream `list_tools` round-trip in this harness."""
-    resolver = PolicyResolver(overrides=load_policies(builtin_pack_paths()))
+    resolver = PolicyResolver(overrides=load_policies(_benchmark_pack_paths()))
     return ContractEngine(
         resolver=resolver,
         taint=TaintTracker(),
@@ -84,16 +94,17 @@ def _build_engine() -> ContractEngine:
 
 
 def _pack_covered_tools() -> set[str]:
-    return set(load_policies(builtin_pack_paths()).keys())
+    return set(load_policies(_benchmark_pack_paths()).keys())
 
 
 class _CallRecord:
-    __slots__ = ("tool", "verdict", "pack_covered")
+    __slots__ = ("tool", "verdict", "pack_covered", "sink")
 
-    def __init__(self, tool: str, verdict: str, pack_covered: bool) -> None:
+    def __init__(self, tool: str, verdict: str, pack_covered: bool, sink: bool) -> None:
         self.tool = tool
         self.verdict = verdict
         self.pack_covered = pack_covered
+        self.sink = sink  # tool's resolved policy is exfiltrating
 
 
 def _make_recording_tools_executor(engine: ContractEngine, records: list[_CallRecord], pack_tools: set[str]):
@@ -128,7 +139,8 @@ def _make_recording_tools_executor(engine: ContractEngine, records: list[_CallRe
                 call = ToolCall(tool=name, args=dict(tool_call.args))
                 decision = engine.evaluate(call)
                 pack_covered = name in pack_tools
-                records.append(_CallRecord(name, decision.verdict.value, pack_covered))
+                sink = engine._resolver.policy_for(name, schema).exfiltrating
+                records.append(_CallRecord(name, decision.verdict.value, pack_covered, sink))
 
                 if decision.verdict is Verdict.ALLOW:
                     raw_result, error = runtime.run_function(env, name, tool_call.args)
@@ -363,40 +375,62 @@ def _run_suite(user_tasks: list[str], logdir: Path) -> dict[str, list[_CallRecor
 
 
 def _split_verdicts(records: list[_CallRecord]) -> dict[str, list[str]]:
-    pack = [r.verdict for r in records if r.pack_covered]
-    heuristic = [r.verdict for r in records if not r.pack_covered]
-    return {"all": [r.verdict for r in records], "pack": pack, "heuristic": heuristic}
+    return {
+        "all": [r.verdict for r in records],
+        "sink": [r.verdict for r in records if r.sink],
+        "pack": [r.verdict for r in records if r.pack_covered],
+        "heuristic": [r.verdict for r in records if not r.pack_covered],
+    }
+
+
+def _verdict_counts(records: list[_CallRecord]) -> dict[str, int]:
+    counts = {"allow": 0, "ask": 0, "deny": 0}
+    for r in records:
+        counts[r.verdict] = counts.get(r.verdict, 0) + 1
+    return counts
 
 
 def _summarize(records_by_suite: dict[str, list[_CallRecord]]) -> dict[str, object]:
     attack_split = _split_verdicts(records_by_suite["attack"])
     benign_split = _split_verdicts(records_by_suite["benign"])
     return {
+        # "sink" (exfiltrating-tool calls) is the metric that matters: on the
+        # attack suite it is where the injected destination shows up; diluting
+        # it with read-only calls makes both good and bad numbers look small.
         "attack_block_rate": {k: block_rate(v) for k, v in attack_split.items()},
         "benign_false_positive_rate": {k: block_rate(v) for k, v in benign_split.items()},
         "attack_call_counts": {k: len(v) for k, v in attack_split.items()},
         "benign_call_counts": {k: len(v) for k, v in benign_split.items()},
+        # ask vs deny matters for UX honesty: an ASK is a one-tap, remembered
+        # approval; a DENY is a hard block.
+        "attack_verdict_counts": _verdict_counts(records_by_suite["attack"]),
+        "benign_verdict_counts": _verdict_counts(records_by_suite["benign"]),
     }
 
 
 def _render_markdown(summary: dict[str, object]) -> str:
-    lines = [
-        "| metric | all | pack-covered | heuristic-covered |",
-        "|---|---|---|---|",
-        (
-            "| attack-block-rate | "
-            f"{summary['attack_block_rate']['all']:.2f} | "
-            f"{summary['attack_block_rate']['pack']:.2f} | "
-            f"{summary['attack_block_rate']['heuristic']:.2f} |"
-        ),
-        (
-            "| benign false-positive rate | "
-            f"{summary['benign_false_positive_rate']['all']:.2f} | "
-            f"{summary['benign_false_positive_rate']['pack']:.2f} | "
-            f"{summary['benign_false_positive_rate']['heuristic']:.2f} |"
-        ),
-    ]
-    return "\n".join(lines)
+    def _row(label: str, rates: dict[str, float], counts: dict[str, int]) -> str:
+        cells = " | ".join(
+            f"{rates[k]:.2f} (n={counts[k]})" if counts[k] else "n/a (n=0)"
+            for k in ("sink", "all", "pack", "heuristic")
+        )
+        return f"| {label} | {cells} |"
+
+    return "\n".join(
+        [
+            "| metric | sink calls | all calls | pack-covered | heuristic-covered |",
+            "|---|---|---|---|---|",
+            _row("attack-block-rate", summary["attack_block_rate"], summary["attack_call_counts"]),
+            _row(
+                "benign false-positive rate",
+                summary["benign_false_positive_rate"],
+                summary["benign_call_counts"],
+            ),
+            "",
+            f"attack verdicts: {summary['attack_verdict_counts']}",
+            f"benign verdicts: {summary['benign_verdict_counts']}",
+        ]
+    )
 
 
 def _run_deterministic_wiring() -> None:
