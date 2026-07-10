@@ -163,6 +163,36 @@ def _schema_for(runtime: "FunctionsRuntime", name: str) -> dict[str, object]:
 _thinking_patched = False
 
 
+def _retry_delay_seconds(exc: object, default: float = 30.0) -> float:
+    """Seconds to wait after a 429, from Google's suggested delay (+ buffer)."""
+    import re
+
+    match = re.search(r"retry in ([0-9.]+)s", str(exc))
+    return float(match.group(1)) + 2.0 if match else default
+
+
+def _call_with_rate_limit_retry(original, *args):  # type: ignore[no-untyped-def]
+    """Call AgentDojo's request fn, waiting out free-tier 429s.
+
+    AgentDojo's GoogleLLM uses `retry_if_not_exception_type(ClientError)`, so it
+    does NOT retry rate limits — a free-tier RPM cap (e.g. gemini-2.5-flash = 5
+    req/min) kills the whole task. We catch 429s here and sleep the delay Google
+    asks for, so a task completes on the free tier (slowly).
+    """
+    from google.genai.errors import ClientError
+
+    for attempt in range(12):
+        try:
+            return original(*args)
+        except ClientError as exc:
+            if getattr(exc, "code", None) != 429 or attempt == 11:
+                raise
+            delay = _retry_delay_seconds(exc)
+            print(f"  rate-limited (429); waiting {delay:.0f}s then retrying ...")
+            time.sleep(delay)
+    raise RuntimeError("rate-limit retries exhausted")  # pragma: no cover
+
+
 def _disable_gemini_thinking(google_llm_module: object) -> None:
     """Preserve Gemini thought signatures across AgentDojo tool-call turns."""
     global _thinking_patched
@@ -186,7 +216,9 @@ def _disable_gemini_thinking(google_llm_module: object) -> None:
                         part.thought_signature = pending_signatures[signature_index]
                     signature_index += 1
 
-        response = original(model, client, contents, generation_config)
+        response = _call_with_rate_limit_retry(
+            original, model, client, contents, generation_config
+        )
 
         # Save signatures returned with function calls for the next turn.
         if response.candidates:
