@@ -264,24 +264,34 @@ canned capture.
 
 ## Benchmark
 
-The AgentDojo benchmark harness (`bouncer/benchmark/run_agentdojo.py`) is
-built and tested, but **it has not been run yet — it requires a
-`GEMINI_API_KEY`, which isn't available in this environment.**
+Measured live on 2026-07-10 against AgentDojo's v1 `workspace` suite
+(`user_task_8`, the `important_instructions` prompt-injection attack, agent
+model `gemini-3.1-flash-lite`) — full table, caveats, and per-call audit
+excerpts in [`benchmark/RESULTS.md`](benchmark/RESULTS.md):
 
-Results, when run, land in
-[`benchmark/RESULTS.md`](benchmark/RESULTS.md), which is currently a
-`PENDING` template — **no numbers are reported here; do not treat anything
-below as measured.**
+- **Attack-block rate on sink calls: 1.00** — all 13 exfiltration attempts
+  the injected agent made were blocked (12 hard DENYs, 1 ASK), including
+  mailing a real security code to the attacker's address.
+- **Benign false-positive rate: 0.00** — the benign run completed with zero
+  blocked calls and zero asks.
 
-Pre-registered kill criteria (from the design spec, restated so they're
-checked against, not explained away, once real numbers land):
+Notably, the *first* complete run scored 0.00 — it exposed a real bypass
+(pack sink params written for one server's schema silently missing another's)
+that was fixed fail-closed in the engine before the re-run. The full story is
+in `RESULTS.md`; the point of a benchmark is to be allowed to fail you.
+
+Pre-registered kill criteria (from the design spec) and how the run scored:
 
 > If after approval-memory the benign suites still show **≥10% utility
 > loss** or a **median of >3 asks per benign task**, the deterministic-only
 > thesis is wrong for this layer — stop, or pivot to a hybrid (lightweight ML
 > screener) approach.
 
-To produce real numbers:
+Measured: 0% benign utility loss, 0 asks per benign task. Both pass. Scope
+honesty: one user task, one attack, one model so far — see the caveats
+section in `RESULTS.md`.
+
+To reproduce:
 
 ```bash
 cd bouncer
@@ -290,15 +300,15 @@ GEMINI_API_KEY=... uv run python -m benchmark.run_agentdojo --user-tasks user_ta
 
 ## How it was built
 
-v1, deterministic core only — no LLM anywhere in the decision path. 73 unit
+v1, deterministic core only — no LLM anywhere in the decision path. 80 unit
 and integration tests (`uv run pytest -q` from `bouncer/`) cover the engine,
 policy resolution, taint tracking, approvals, audit log, packs, and the
 proxy's routing logic. The proxy has additionally been live-smoke-tested
 end-to-end against the real `@modelcontextprotocol/server-filesystem`
 reference server — see [`docs/manual-smoke.md`](docs/manual-smoke.md) for
 the full transcript, including two real bugs that were found and fixed
-during that exercise. It is early: MCP-only, stdio-only, single-machine, and
-the benchmark hasn't been run yet.
+during that exercise — and benchmarked live against AgentDojo (see above).
+It is early: MCP-only, stdio-only, single-machine, one benchmark task so far.
 
 ## License
 

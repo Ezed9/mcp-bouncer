@@ -301,11 +301,13 @@ def _build_pipeline(engine: ContractEngine, records: list[_CallRecord], pack_too
     _disable_gemini_thinking(google_llm)
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    # gemini-3.5-flash's free tier is only 20 requests/DAY, and one AgentDojo
-    # task makes many calls — so it 429s almost immediately. Default to
-    # gemini-2.5-flash (a far larger free-tier quota, separate bucket); override
-    # with BOUNCER_GEMINI_MODEL for a paid key or a different model.
-    model = os.environ.get("BOUNCER_GEMINI_MODEL", "gemini-2.5-flash")
+    # Default verified live on a free-tier key (2026-07-10). Avoid
+    # gemini-3.5-flash (20 req/DAY free tier — one task needs more) and
+    # gemini-2.5-flash / 2.0-flash (404 "no longer available to new users" on
+    # new keys). Lite tiers have the largest free per-minute quotas. Override
+    # with BOUNCER_GEMINI_MODEL; on a 404 the driver prints the models your
+    # key can actually call.
+    model = os.environ.get("BOUNCER_GEMINI_MODEL", "gemini-3.1-flash-lite")
     llm = GoogleLLM(model, client=client)
     system_message = SystemMessage(load_system_message(None))
     init_query = InitQuery()
