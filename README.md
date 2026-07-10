@@ -295,7 +295,7 @@ To reproduce:
 
 ```bash
 cd bouncer
-GEMINI_API_KEY=... uv run python -m benchmark.run_agentdojo --user-tasks user_task_8
+GEMINI_API_KEY=... uv run --extra benchmark python -m benchmark.run_agentdojo --user-tasks user_task_8
 ```
 
 ## How it was built

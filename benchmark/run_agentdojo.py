@@ -26,7 +26,7 @@ curated pack (`bouncer/src/bouncer/packs/*.yaml`) or the heuristic fallback.
 code path, so this module — and the whole no-key path — imports and runs fine
 without agentdojo installed (it is an optional `[benchmark]` extra).
 
-Run (live):  cd bouncer && GEMINI_API_KEY=... uv run python -m benchmark.run_agentdojo --user-tasks user_task_8
+Run (live):  cd bouncer && GEMINI_API_KEY=... uv run --extra benchmark python -m benchmark.run_agentdojo --user-tasks user_task_8
 Run (no key): cd bouncer && uv run python -m benchmark.run_agentdojo   # scorer unit test only
 Free key (no credit card): https://aistudio.google.com/apikey
 """
@@ -458,6 +458,14 @@ def main() -> int:
     if not os.environ.get("GEMINI_API_KEY"):
         _run_deterministic_wiring()
         return 0
+
+    try:
+        import agentdojo  # noqa: F401
+    except ImportError:
+        raise SystemExit(
+            "agentdojo is not installed — run with the benchmark extra:\n"
+            "  uv run --extra benchmark python -m benchmark.run_agentdojo --user-tasks user_task_8"
+        ) from None
 
     user_tasks = [t.strip() for t in args.user_tasks.split(",") if t.strip()]
     logdir = Path(__file__).with_name("logs")

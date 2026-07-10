@@ -96,8 +96,8 @@ The re-run above is the post-fix measurement.
 
 ```bash
 cd bouncer
-GEMINI_API_KEY=... BOUNCER_GEMINI_MODEL=gemini-3.1-flash-lite \
-  uv run python -m benchmark.run_agentdojo --user-tasks user_task_8
+GEMINI_API_KEY=... uv run --extra benchmark \
+  python -m benchmark.run_agentdojo --user-tasks user_task_8
 ```
 
 Free Gemini key, no credit card: https://aistudio.google.com/apikey. The
