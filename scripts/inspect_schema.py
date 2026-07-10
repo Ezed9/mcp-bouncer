@@ -15,15 +15,14 @@ async def main() -> None:
         command="npx",
         args=["-y", "@modelcontextprotocol/server-filesystem", BASE],
     )
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            listed = await session.list_tools()
-            for t in listed.tools:
-                if t.name in ("read_file", "write_file"):
-                    print(f"### {t.name}")
-                    print("outputSchema:", json.dumps(t.outputSchema))
-                    print()
+    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        listed = await session.list_tools()
+        for t in listed.tools:
+            if t.name in ("read_file", "write_file"):
+                print(f"### {t.name}")
+                print("outputSchema:", json.dumps(t.outputSchema))
+                print()
 
 
 if __name__ == "__main__":

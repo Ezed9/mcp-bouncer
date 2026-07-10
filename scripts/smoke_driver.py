@@ -39,41 +39,40 @@ async def main() -> None:
         command=str(BOUNCER),
         args=["run", "--config", str(CONFIG), "--upstream-name", "filesystem"],
     )
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
+    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
 
-            listed = await session.list_tools()
-            print("=== tools/list (real names from live server) ===")
-            for t in listed.tools:
-                print(f"  - {t.name}")
+        listed = await session.list_tools()
+        print("=== tools/list (real names from live server) ===")
+        for t in listed.tools:
+            print(f"  - {t.name}")
+        print()
+
+        async def call(label: str, name: str, args: dict[str, object]) -> None:
+            print(f"--- {label}: {name}({args}) ---")
+            try:
+                res = await session.call_tool(name, args)
+                print(_text(res))
+            except Exception as exc:  # noqa: BLE001 - smoke driver
+                print(f"EXCEPTION: {type(exc).__name__}: {exc}")
             print()
 
-            async def call(label: str, name: str, args: dict[str, object]) -> None:
-                print(f"--- {label}: {name}({args}) ---")
-                try:
-                    res = await session.call_tool(name, args)
-                    print(_text(res))
-                except Exception as exc:  # noqa: BLE001 - smoke driver
-                    print(f"EXCEPTION: {type(exc).__name__}: {exc}")
-                print()
+        base = str(HERE / "smoke_work")
 
-            base = str(HERE / "smoke_work")
+        # (a) read then write into ./out -> expect ALLOW (see note on pack prefixes)
+        await call("a1 read_file", "read_file",
+                   {"path": f"{base}/mcp-config.json"})
+        await call("a2 write_file into out", "write_file",
+                   {"path": f"{base}/out/hello.txt", "content": "hello from smoke"})
 
-            # (a) read then write into ./out -> expect ALLOW (see note on pack prefixes)
-            await call("a1 read_file", "read_file",
-                       {"path": f"{base}/mcp-config.json"})
-            await call("a2 write_file into out", "write_file",
-                       {"path": f"{base}/out/hello.txt", "content": "hello from smoke"})
+        # (b) write outside allowed prefix -> expect DENY (constraint)
+        await call("b write_file to /etc", "write_file",
+                   {"path": "/etc/bouncer_should_not_write.txt", "content": "nope"})
 
-            # (b) write outside allowed prefix -> expect DENY (constraint)
-            await call("b write_file to /etc", "write_file",
-                       {"path": "/etc/bouncer_should_not_write.txt", "content": "nope"})
-
-            # (c) delete tool 3x with max_calls=2 -> third DENY (budget)
-            for i in (1, 2, 3):
-                await call(f"c delete #{i}", "delete_file",
-                           {"path": f"{base}/out/hello.txt"})
+        # (c) delete tool 3x with max_calls=2 -> third DENY (budget)
+        for i in (1, 2, 3):
+            await call(f"c delete #{i}", "delete_file",
+                       {"path": f"{base}/out/hello.txt"})
 
 
 if __name__ == "__main__":

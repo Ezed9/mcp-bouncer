@@ -17,12 +17,23 @@ benchmark = ["agentdojo>=0.1.35"]
 bouncer = "bouncer.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "PIE"]
+# UP042: Verdict/TrustLevel are deliberately (str, Enum), not StrEnum — the
+# base class is load-bearing and we depend on .value serialization; not worth
+# churning core security enums for a stylistic rule.
+ignore = ["UP042"]
 
 [build-system]
 requires = ["hatchling"]

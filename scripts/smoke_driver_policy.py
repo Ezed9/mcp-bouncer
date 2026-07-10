@@ -48,31 +48,30 @@ async def main() -> None:
             "--policy", str(POLICY),
         ],
     )
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
+    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
 
-            async def call(label: str, name: str, args: dict[str, object]) -> None:
-                print(f"--- {label}: {name}({args}) ---")
-                try:
-                    res = await session.call_tool(name, args)
-                    print(_text(res))
-                except Exception as exc:  # noqa: BLE001 - smoke driver
-                    print(f"EXCEPTION: {type(exc).__name__}: {exc}")
-                print()
+        async def call(label: str, name: str, args: dict[str, object]) -> None:
+            print(f"--- {label}: {name}({args}) ---")
+            try:
+                res = await session.call_tool(name, args)
+                print(_text(res))
+            except Exception as exc:  # noqa: BLE001 - smoke driver
+                print(f"EXCEPTION: {type(exc).__name__}: {exc}")
+            print()
 
-            base = str(HERE / "smoke_work")
+        base = str(HERE / "smoke_work")
 
-            # constraint: write outside allowed prefix -> Bouncer DENY (constraint)
-            await call("b write_file to /etc", "write_file",
-                       {"path": "/etc/bouncer_should_not_write.txt", "content": "nope"})
+        # constraint: write outside allowed prefix -> Bouncer DENY (constraint)
+        await call("b write_file to /etc", "write_file",
+                   {"path": "/etc/bouncer_should_not_write.txt", "content": "nope"})
 
-            # budget: 3 writes into ./out with max_calls=2 -> 2nd DENY (budget),
-            # because the earlier constraint-denied /etc call above already
-            # consumed a budget slot (budget counts attempts, not successes)
-            for i in (1, 2, 3):
-                await call(f"c write #{i} into out", "write_file",
-                           {"path": f"{base}/out/note{i}.txt", "content": "ok"})
+        # budget: 3 writes into ./out with max_calls=2 -> 2nd DENY (budget),
+        # because the earlier constraint-denied /etc call above already
+        # consumed a budget slot (budget counts attempts, not successes)
+        for i in (1, 2, 3):
+            await call(f"c write #{i} into out", "write_file",
+                       {"path": f"{base}/out/note{i}.txt", "content": "ok"})
 
 
 if __name__ == "__main__":

@@ -1,5 +1,10 @@
 # Bouncer
 
+[![CI](https://github.com/Ezed9/mcp-bouncer/actions/workflows/ci.yml/badge.svg)](https://github.com/Ezed9/mcp-bouncer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
+[![No LLM in the decision path](https://img.shields.io/badge/decision%20path-deterministic-brightgreen.svg)](#the-three-verdicts)
+
 **The only tool that asks whether *this destination* should receive *this
 value* — not whether this tool is allowed to run.**
 
@@ -12,7 +17,7 @@ human; nothing is scored by a classifier. **There is no LLM in the
 enforcement path** — the whole decision is plain Python running against a
 recorded schema, a policy, and a taint log.
 
-Status: **v1, early.** Deterministic core is 73 tests green and the proxy has
+Status: **v1, early.** Deterministic core is 82 tests green and the proxy has
 been exercised live, end-to-end, against the reference filesystem MCP server
 (see [`docs/manual-smoke.md`](docs/manual-smoke.md)). It is MCP-only — read
 [Documented limits](#documented-limits) before you rely on it.
@@ -230,7 +235,9 @@ Want a recorded GIF/asciinema of this against Claude Code or Cursor? None
 exists yet — record your own with the commands above rather than trust a
 canned capture.
 
-## Documented limits — where Bouncer is NOT the authority
+## Documented limits
+
+**Where Bouncer is _not_ the authority.**
 
 - **MCP-only scope.** Bouncer governs MCP tool calls. An agent with raw shell
   access can `curl` data out around the proxy entirely — pair Bouncer with

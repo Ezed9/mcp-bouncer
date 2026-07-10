@@ -29,7 +29,8 @@ detail — useful colour, but NOT the headline claim.
 path, so the no-key path imports and runs fine without agentdojo installed
 (it is an optional `[benchmark]` extra).
 
-Run (live):  cd bouncer && GEMINI_API_KEY=... uv run --extra benchmark python -m benchmark.run_agentdojo
+Run (live):  cd bouncer && GEMINI_API_KEY=... uv run --extra benchmark \
+                 python -m benchmark.run_agentdojo
 Run (no key): cd bouncer && uv run python -m benchmark.run_agentdojo   # scorer unit test only
 Free key (no credit card): https://aistudio.google.com/apikey
 """
@@ -105,7 +106,7 @@ class _CallRecord:
         self.sink = sink  # resolved policy is exfiltrating
 
 
-def _schema_for(runtime: "FunctionsRuntime", name: str) -> dict[str, object]:
+def _schema_for(runtime: FunctionsRuntime, name: str) -> dict[str, object]:
     fn = runtime.functions.get(name)
     if fn is None:
         return {}
@@ -123,7 +124,8 @@ def _make_recording_tools_executor(engine: ContractEngine, records: list[_CallRe
     from agentdojo.types import ChatToolResultMessage, text_content_block_from_string
 
     class _RecordingToolsExecutor(ToolsExecutor):
-        def query(self, query, runtime, env=EmptyEnv(), messages=(), extra_args=None):
+        # env=EmptyEnv() default mirrors AgentDojo's ToolsExecutor.query signature.
+        def query(self, query, runtime, env=EmptyEnv(), messages=(), extra_args=None):  # noqa: B008
             extra_args = extra_args or {}
             if len(messages) == 0 or messages[-1]["role"] != "assistant":
                 return query, runtime, env, messages, extra_args
@@ -293,10 +295,9 @@ def _disable_gemini_thinking(google_llm_module: object) -> None:
 
 
 def _gemini_llm():
-    from google import genai
-
     from agentdojo.agent_pipeline.llms import google_llm
     from agentdojo.agent_pipeline.llms.google_llm import GoogleLLM
+    from google import genai
 
     _disable_gemini_thinking(google_llm)
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
@@ -314,7 +315,9 @@ def _pipeline(llm, tools_executor):
     from agentdojo.agent_pipeline.tool_execution import ToolsExecutionLoop
 
     tools_loop = ToolsExecutionLoop([tools_executor, llm])
-    pipeline = AgentPipeline([SystemMessage(load_system_message(None)), InitQuery(), llm, tools_loop])
+    pipeline = AgentPipeline(
+        [SystemMessage(load_system_message(None)), InitQuery(), llm, tools_loop]
+    )
     # AgentDojo's attack loader resolves the model by finding a known model-id
     # KEY as a substring of pipeline.name; label with one that maps to Google's
     # prose name so the injection is addressed identically regardless of the
