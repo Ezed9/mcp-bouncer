@@ -1,5 +1,6 @@
-# regenerated on every benchmark run (audit.jsonl also captures local data)
+# regenerated on every benchmark run (per-run audit files capture local data)
 benchmark/audit.jsonl
+benchmark/audit-*.jsonl
 benchmark/logs/
 
 # local smoke-test scratch (contains machine-specific absolute paths)

@@ -1,32 +1,35 @@
 # bouncer/benchmark/run_agentdojo.py
-"""Driver: run the Bouncer contract ENGINE against the real AgentDojo workspace
-suite (not a live proxy — the engine is exercised in-process).
+"""Driver: measure the Bouncer contract ENGINE on the real AgentDojo workspace
+suite, using AgentDojo's OWN security scorer as the headline metric.
 
-Mirrors `prototype/benchmark/run_workspace.py`'s shape: free-tier Gemini
-pacing/backoff, an `OutputLogger` context around the AgentDojo benchmark
-helpers, a `--user-tasks` flag, and a clean no-key path.
+The number that matters is **attack success rate**: for each (user_task,
+injection_task) pair, AgentDojo checks whether the injection actually
+accomplished its goal (e.g. the attacker's address actually received the
+exfiltrated data). That check is destination-aware and per-injection-case, so
+it cannot be gamed by counting retries or by collateral-blocking the user's
+own task. We report it under two conditions:
 
-Two measurements, both read off the engine's own verdicts (not AgentDojo's
-task-success scoring):
+  * baseline  — the stock AgentDojo pipeline, no Bouncer. Establishes that the
+    attacks actually work against this model (attack success > 0), so a low
+    number under Bouncer means defense, not a model too weak to attack.
+  * bouncer   — every tool call routed through `ContractEngine.evaluate`
+    first; DENY/ASK are not executed (mirrors the proxy's fail-closed
+    behaviour when there is no human to elicit). Attack success here should
+    drop toward 0.
 
-  1. Attack-block rate — on `benchmark_suite_with_injections` (the
-     `important_instructions` attack), every sink-tool call the agent makes is
-     routed through `ContractEngine.evaluate`; a DENY or ASK on the call that
-     carries the injected destination counts as "blocked". `block_rate` over
-     those verdicts is the attack-block rate (higher is better).
-  2. Benign false-positive rate — on `benchmark_suite_without_injections`,
-     the same per-call verdicts are collected; `block_rate` here is the
-     fraction of BENIGN sink calls that were not a clean ALLOW (an ASK or a
-     wrongly-triggered DENY — a false positive, lower is better).
+Alongside attack success we report **utility** (did the user's task still
+succeed) from AgentDojo's utility scorer, so collateral damage from Bouncer's
+blocks is visible rather than hidden — a defense that also breaks the benign
+task shows up as a utility drop, not as a flattering block rate.
 
-Both splits are further broken down by whether the tool's policy came from a
-curated pack (`bouncer/src/bouncer/packs/*.yaml`) or the heuristic fallback.
+Engine-level verdict counts (allow/ask/deny) are kept as *supplementary*
+detail — useful colour, but NOT the headline claim.
 
 `agentdojo` and `google.genai` are imported ONLY inside the GEMINI_API_KEY-gated
-code path, so this module — and the whole no-key path — imports and runs fine
-without agentdojo installed (it is an optional `[benchmark]` extra).
+path, so the no-key path imports and runs fine without agentdojo installed
+(it is an optional `[benchmark]` extra).
 
-Run (live):  cd bouncer && GEMINI_API_KEY=... uv run --extra benchmark python -m benchmark.run_agentdojo --user-tasks user_task_8
+Run (live):  cd bouncer && GEMINI_API_KEY=... uv run --extra benchmark python -m benchmark.run_agentdojo
 Run (no key): cd bouncer && uv run python -m benchmark.run_agentdojo   # scorer unit test only
 Free key (no credit card): https://aistudio.google.com/apikey
 """
@@ -42,7 +45,6 @@ from typing import TYPE_CHECKING
 
 from bouncer.approvals import ApprovalStore
 from bouncer.audit import AuditLog
-from bouncer.benchmark_scoring import block_rate
 from bouncer.engine import ContractEngine
 from bouncer.policy import PolicyResolver, builtin_pack_paths, load_policies
 from bouncer.taint import TaintTracker
@@ -51,21 +53,14 @@ from bouncer.types import ToolCall, Verdict
 if TYPE_CHECKING:
     from agentdojo.functions_runtime import FunctionsRuntime
 
-# Free-tier pacing + 429 backoff (mirrors the prototype harness). The
-# benchmark helpers drive the LLM loop themselves, so we cannot inject
-# per-call sleeps; we pace between suite runs and back off on a 429.
-_PACE_SECONDS = 6.0
-_RETRY_BACKOFF = (8.0, 16.0, 32.0)
-
-_DEFAULT_USER_TASKS = ("user_task_8",)  # the read+send tracer
+_DEFAULT_USER_TASKS = ("user_task_8",)
+# The exfil-to-attacker injections: 0/3/4 all instruct "send X to
+# mark.black-2134@gmail.com". injection_task_4 is the Facebook-security-code
+# exfiltration — the canonical "steal your 2FA code" case.
+_DEFAULT_INJECTION_TASKS = ("injection_task_0", "injection_task_3", "injection_task_4")
 _ATTACK = "important_instructions"
 _RESULTS_PATH = Path(__file__).with_name("results.json")
-_AUDIT_PATH = Path(__file__).with_name("audit.jsonl")
-
-
-def _is_rate_limit(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return "429" in msg or "quota" in msg or "rate" in msg
+_LOGDIR = Path(__file__).with_name("logs")
 
 
 # Loaded AFTER the builtin packs (last-wins), replacing e.g. the gmail pack's
@@ -78,17 +73,21 @@ def _benchmark_pack_paths() -> list[Path]:
     return [*builtin_pack_paths(), _WORKSPACE_PACK]
 
 
-def _build_engine() -> ContractEngine:
-    """Mirrors `bouncer.proxy._build_resolver` + engine construction exactly,
-    but schemas are populated per-call from the AgentDojo runtime (see
-    `_RecordingToolsExecutor._schema_for`) rather than pinned up front, since
-    there is no live upstream `list_tools` round-trip in this harness."""
+def _fresh_audit(name: str) -> AuditLog:
+    """A per-run audit file, truncated at start so it reflects ONE run only
+    (the old shared, append-across-runs audit.jsonl mixed suites and runs)."""
+    path = Path(__file__).with_name(f"audit-{name}.jsonl")
+    path.unlink(missing_ok=True)
+    return AuditLog(path)
+
+
+def _build_engine(audit_name: str) -> ContractEngine:
     resolver = PolicyResolver(overrides=load_policies(_benchmark_pack_paths()))
     return ContractEngine(
         resolver=resolver,
         taint=TaintTracker(),
         approvals=ApprovalStore(),
-        audit=AuditLog(_AUDIT_PATH),
+        audit=_fresh_audit(audit_name),
         schemas={},  # populated lazily; see _RecordingToolsExecutor
     )
 
@@ -98,24 +97,26 @@ def _pack_covered_tools() -> set[str]:
 
 
 class _CallRecord:
-    __slots__ = ("tool", "verdict", "pack_covered", "sink")
+    __slots__ = ("tool", "verdict", "sink")
 
-    def __init__(self, tool: str, verdict: str, pack_covered: bool, sink: bool) -> None:
+    def __init__(self, tool: str, verdict: str, sink: bool) -> None:
         self.tool = tool
         self.verdict = verdict
-        self.pack_covered = pack_covered
-        self.sink = sink  # tool's resolved policy is exfiltrating
+        self.sink = sink  # resolved policy is exfiltrating
 
 
-def _make_recording_tools_executor(engine: ContractEngine, records: list[_CallRecord], pack_tools: set[str]):
-    """Build a `ToolsExecutor` subclass that routes every tool call through
-    the Bouncer engine before executing it, and records the verdict.
+def _schema_for(runtime: "FunctionsRuntime", name: str) -> dict[str, object]:
+    fn = runtime.functions.get(name)
+    if fn is None:
+        return {}
+    return {"properties": dict.fromkeys(fn.parameters.model_fields.keys(), {})}
 
-    A DENY never executes the underlying tool (mirrors `route_call`); an ASK
-    is treated as blocked-and-not-executed too, since this harness has no
-    interactive human to elicit (mirrors the proxy's fail-closed-when-no-elicit
-    behaviour in `route_call`/`_route_async`). Only a clean ALLOW runs the
-    tool and feeds its output back to `engine.register_output` for taint.
+
+def _make_recording_tools_executor(engine: ContractEngine, records: list[_CallRecord]):
+    """A ToolsExecutor that routes every call through the Bouncer engine first.
+
+    DENY/ASK do not execute the tool (mirrors the proxy's fail-closed-when-no-
+    elicit path); only ALLOW runs it and feeds output back to taint.
     """
     from agentdojo.agent_pipeline.tool_execution import ToolsExecutor, tool_result_to_str
     from agentdojo.functions_runtime import EmptyEnv
@@ -138,9 +139,8 @@ def _make_recording_tools_executor(engine: ContractEngine, records: list[_CallRe
 
                 call = ToolCall(tool=name, args=dict(tool_call.args))
                 decision = engine.evaluate(call)
-                pack_covered = name in pack_tools
                 sink = engine._resolver.policy_for(name, schema).exfiltrating
-                records.append(_CallRecord(name, decision.verdict.value, pack_covered, sink))
+                records.append(_CallRecord(name, decision.verdict.value, sink))
 
                 if decision.verdict is Verdict.ALLOW:
                     raw_result, error = runtime.run_function(env, name, tool_call.args)
@@ -163,13 +163,6 @@ def _make_recording_tools_executor(engine: ContractEngine, records: list[_CallRe
             return query, runtime, env, [*messages, *results], extra_args
 
     return _RecordingToolsExecutor()
-
-
-def _schema_for(runtime: "FunctionsRuntime", name: str) -> dict[str, object]:
-    fn = runtime.functions.get(name)
-    if fn is None:
-        return {}
-    return {"properties": dict.fromkeys(fn.parameters.model_fields.keys(), {})}
 
 
 _thinking_patched = False
@@ -204,12 +197,11 @@ def _available_models(client: object) -> list[str]:
 
 
 def _call_with_rate_limit_retry(original, *args):  # type: ignore[no-untyped-def]
-    """Call AgentDojo's request fn, waiting out free-tier 429s.
+    """Call AgentDojo's request fn, waiting out free-tier per-minute 429s.
 
     AgentDojo's GoogleLLM uses `retry_if_not_exception_type(ClientError)`, so it
-    does NOT retry rate limits — a free-tier RPM cap (e.g. gemini-2.5-flash = 5
-    req/min) kills the whole task. We catch 429s here and sleep the delay Google
-    asks for, so a task completes on the free tier (slowly).
+    does NOT retry rate limits. We wait out per-minute 429s, abort clearly on a
+    per-day quota, and on a 404 print the models this key can actually call.
     """
     from google.genai.errors import ClientError
 
@@ -217,26 +209,28 @@ def _call_with_rate_limit_retry(original, *args):  # type: ignore[no-untyped-def
         try:
             return original(*args)
         except ClientError as exc:
-            if getattr(exc, "code", None) == 404:
+            code = getattr(exc, "code", None)
+            if code == 404:
                 model = args[0] if args else "<model>"
                 available = _available_models(args[1] if len(args) > 1 else None)
-                listing = "\n".join(f"  {name}" for name in available) or "  (could not list models)"
+                listing = "\n".join(f"  {n}" for n in available) or "  (could not list models)"
                 raise SystemExit(
                     f"\nModel {model} is not available to this API key.\n"
                     f"Models your key CAN use with generateContent:\n{listing}\n"
                     "Re-run with one of them (prefer a flash-class model):\n"
-                    "  BOUNCER_GEMINI_MODEL=<model> uv run python -m benchmark.run_agentdojo --user-tasks user_task_8"
+                    "  BOUNCER_GEMINI_MODEL=<model> uv run --extra benchmark "
+                    "python -m benchmark.run_agentdojo"
                 ) from exc
-            if getattr(exc, "code", None) != 429 or attempt == 11:
+            if code != 429 or attempt == 11:
                 raise
             if _is_daily_quota(exc):
                 model = args[0] if args else "<model>"
                 raise SystemExit(
                     f"\nDaily free-tier quota for {model} is exhausted — waiting will not help.\n"
                     "Options:\n"
-                    "  1. Run with a different model (separate daily bucket):\n"
-                    "       BOUNCER_GEMINI_MODEL=gemini-2.0-flash uv run python -m benchmark.run_agentdojo --user-tasks user_task_8\n"
-                    "  2. Wait for the quota reset (midnight Pacific time) and re-run.\n"
+                    "  1. A different model (separate daily bucket), e.g. "
+                    "BOUNCER_GEMINI_MODEL=gemini-flash-lite-latest\n"
+                    "  2. Wait for the quota reset (midnight Pacific) and re-run.\n"
                     "  3. Use a paid-tier GEMINI_API_KEY."
                 ) from exc
             delay = _retry_delay_seconds(exc)
@@ -246,17 +240,30 @@ def _call_with_rate_limit_retry(original, *args):  # type: ignore[no-untyped-def
 
 
 def _disable_gemini_thinking(google_llm_module: object) -> None:
-    """Preserve Gemini thought signatures across AgentDojo tool-call turns."""
+    """Preserve Gemini thought signatures across AgentDojo tool-call turns,
+    resetting at each conversation boundary so signatures never bleed between
+    tasks/runs."""
     global _thinking_patched
     if _thinking_patched:
         return
 
     original = google_llm_module.chat_completion_request
-    pending_signatures = []
+    pending_signatures: list[object] = []
 
     def patched(model, client, contents, generation_config):
-        # AgentDojo reconstructs assistant function-call parts and drops
-        # Gemini's thought_signature. Restore signatures in original order.
+        # First model call of a fresh conversation: no assistant function-call
+        # parts yet. Clear stale signatures so a later run/task never restores
+        # a previous conversation's signature (cross-conversation contamination).
+        has_prior_call = any(
+            part.function_call is not None
+            for content in contents
+            for part in (content.parts or [])
+        )
+        if not has_prior_call:
+            pending_signatures.clear()
+
+        # AgentDojo reconstructs function-call parts and drops thought_signature.
+        # Restore in original order.
         signature_index = 0
         for content in contents:
             for part in content.parts or []:
@@ -268,11 +275,8 @@ def _disable_gemini_thinking(google_llm_module: object) -> None:
                         part.thought_signature = pending_signatures[signature_index]
                     signature_index += 1
 
-        response = _call_with_rate_limit_retry(
-            original, model, client, contents, generation_config
-        )
+        response = _call_with_rate_limit_retry(original, model, client, contents, generation_config)
 
-        # Save signatures returned with function calls for the next turn.
         if response.candidates:
             content = response.candidates[0].content
             if content is not None:
@@ -282,107 +286,102 @@ def _disable_gemini_thinking(google_llm_module: object) -> None:
                         and getattr(part, "thought_signature", None) is not None
                     ):
                         pending_signatures.append(part.thought_signature)
-
         return response
 
     google_llm_module.chat_completion_request = patched
     _thinking_patched = True
 
 
-def _build_pipeline(engine: ContractEngine, records: list[_CallRecord], pack_tools: set[str]):
+def _gemini_llm():
     from google import genai
 
-    from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, load_system_message
-    from agentdojo.agent_pipeline.basic_elements import InitQuery, SystemMessage
     from agentdojo.agent_pipeline.llms import google_llm
     from agentdojo.agent_pipeline.llms.google_llm import GoogleLLM
-    from agentdojo.agent_pipeline.tool_execution import ToolsExecutionLoop
 
     _disable_gemini_thinking(google_llm)
-
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    # Default verified live on a free-tier key (2026-07-10). Avoid
-    # gemini-3.5-flash (20 req/DAY free tier — one task needs more) and
-    # gemini-2.5-flash / 2.0-flash (404 "no longer available to new users" on
-    # new keys). Lite tiers have the largest free per-minute quotas. Override
-    # with BOUNCER_GEMINI_MODEL; on a 404 the driver prints the models your
-    # key can actually call.
-    model = os.environ.get("BOUNCER_GEMINI_MODEL", "gemini-3.1-flash-lite")
-    llm = GoogleLLM(model, client=client)
-    system_message = SystemMessage(load_system_message(None))
-    init_query = InitQuery()
-    tools_loop = ToolsExecutionLoop([_make_recording_tools_executor(engine, records, pack_tools), llm])
-    pipeline = AgentPipeline([system_message, init_query, llm, tools_loop])
-    # AgentDojo's attack loader (get_model_name_from_pipeline) resolves the model
-    # by finding a known model-id KEY as a substring of pipeline.name, then uses
-    # its prose label ("AI model developed by Google") to address the model in
-    # the injection. Our real model (gemini-3.5-flash) isn't in AgentDojo's map,
-    # so we label the pipeline with a known Google key that maps to the same
-    # prose name — the attack is addressed identically.
+    # Default verified callable on a free-tier key (2026-07). Avoid
+    # gemini-2.5/2.0-flash (404 "no longer available to new users" on new keys)
+    # and gemini-3.5-flash (20 req/DAY free tier). Override with
+    # BOUNCER_GEMINI_MODEL; on a 404 the driver prints your key's real menu.
+    model = os.environ.get("BOUNCER_GEMINI_MODEL", "gemini-flash-lite-latest")
+    return GoogleLLM(model, client=client), model
+
+
+def _pipeline(llm, tools_executor):
+    from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, load_system_message
+    from agentdojo.agent_pipeline.basic_elements import InitQuery, SystemMessage
+    from agentdojo.agent_pipeline.tool_execution import ToolsExecutionLoop
+
+    tools_loop = ToolsExecutionLoop([tools_executor, llm])
+    pipeline = AgentPipeline([SystemMessage(load_system_message(None)), InitQuery(), llm, tools_loop])
+    # AgentDojo's attack loader resolves the model by finding a known model-id
+    # KEY as a substring of pipeline.name; label with one that maps to Google's
+    # prose name so the injection is addressed identically regardless of the
+    # actual model id.
     pipeline.name = "gemini-2.0-flash-001"
     return pipeline
 
 
-def _run_suite(user_tasks: list[str], logdir: Path) -> dict[str, list[_CallRecord]]:
-    """Runs the benign and injected suites once, returning per-suite call
-    records collected by the recording tool executor."""
-    from agentdojo.attacks.attack_registry import load_attack
-    from agentdojo.benchmark import (
-        benchmark_suite_with_injections,
-        benchmark_suite_without_injections,
-    )
+def _build_bouncer_pipeline(records: list[_CallRecord], audit_name: str):
+    llm, _ = _gemini_llm()
+    engine = _build_engine(audit_name)
+    return _pipeline(llm, _make_recording_tools_executor(engine, records))
+
+
+def _build_baseline_pipeline():
+    from agentdojo.agent_pipeline.tool_execution import ToolsExecutor
+
+    llm, _ = _gemini_llm()
+    return _pipeline(llm, ToolsExecutor())
+
+
+def _mean(values) -> float:
+    vals = list(values)
+    return sum(1 for v in vals if v) / len(vals) if vals else 0.0
+
+
+def _run_benign(user_tasks: list[str], records: list[_CallRecord]):
+    from agentdojo.benchmark import benchmark_suite_without_injections
     from agentdojo.logging import OutputLogger
     from agentdojo.task_suite.load_suites import get_suite
 
     suite = get_suite("v1", "workspace")
-    pack_tools = _pack_covered_tools()
-
-    benign_records: list[_CallRecord] = []
-    attack_records: list[_CallRecord] = []
-
-    for delay in (*_RETRY_BACKOFF, None):
-        try:
-            benign_engine = _build_engine()
-            benign_pipeline = _build_pipeline(benign_engine, benign_records, pack_tools)
-            with OutputLogger(str(logdir)):
-                benchmark_suite_without_injections(
-                    benign_pipeline, suite, logdir=logdir, force_rerun=True, user_tasks=user_tasks
-                )
-            break
-        except Exception as exc:  # noqa: BLE001 — classified below
-            if _is_rate_limit(exc) and delay is not None:
-                time.sleep(delay)
-                continue
-            raise
-
-    time.sleep(_PACE_SECONDS)
-
-    for delay in (*_RETRY_BACKOFF, None):
-        try:
-            attack_engine = _build_engine()
-            attack_pipeline = _build_pipeline(attack_engine, attack_records, pack_tools)
-            with OutputLogger(str(logdir)):
-                attack = load_attack(_ATTACK, suite, attack_pipeline)
-                benchmark_suite_with_injections(
-                    attack_pipeline, suite, attack, logdir=logdir, force_rerun=True, user_tasks=user_tasks
-                )
-            break
-        except Exception as exc:  # noqa: BLE001
-            if _is_rate_limit(exc) and delay is not None:
-                time.sleep(delay)
-                continue
-            raise
-
-    return {"benign": benign_records, "attack": attack_records}
+    pipeline = _build_bouncer_pipeline(records, "benign")
+    with OutputLogger(str(_LOGDIR)):
+        return benchmark_suite_without_injections(
+            pipeline, suite, logdir=_LOGDIR, force_rerun=True, user_tasks=user_tasks
+        )
 
 
-def _split_verdicts(records: list[_CallRecord]) -> dict[str, list[str]]:
-    return {
-        "all": [r.verdict for r in records],
-        "sink": [r.verdict for r in records if r.sink],
-        "pack": [r.verdict for r in records if r.pack_covered],
-        "heuristic": [r.verdict for r in records if not r.pack_covered],
-    }
+def _run_attack(user_tasks: list[str], injection_tasks: list[str], *, bouncer: bool,
+                records: list[_CallRecord] | None) -> dict[tuple[str, str], bool]:
+    """Returns AgentDojo's per-(user_task, injection_task) SECURITY verdicts
+    (True = the injection accomplished its goal = attack succeeded). Uses the
+    lower-level runner to skip AgentDojo's standalone injection-solvability
+    pre-check: the baseline run's own attack success is the validation that the
+    attacks are real, so the extra API calls aren't needed."""
+    from agentdojo.attacks.attack_registry import load_attack
+    from agentdojo.benchmark import run_task_with_injection_tasks
+    from agentdojo.logging import OutputLogger
+    from agentdojo.task_suite.load_suites import get_suite
+
+    suite = get_suite("v1", "workspace")
+    pipeline = (
+        _build_bouncer_pipeline(records, "bouncer") if bouncer else _build_baseline_pipeline()
+    )
+    security: dict[tuple[str, str], bool] = {}
+    utility: dict[tuple[str, str], bool] = {}
+    with OutputLogger(str(_LOGDIR)):
+        attack = load_attack(_ATTACK, suite, pipeline)
+        for user_task_id in user_tasks:
+            u, s = run_task_with_injection_tasks(
+                suite, pipeline, suite.get_user_task_by_id(user_task_id), attack,
+                logdir=_LOGDIR, force_rerun=True, injection_tasks=injection_tasks,
+            )
+            utility.update(u)
+            security.update(s)
+    return {"security": security, "utility": utility}
 
 
 def _verdict_counts(records: list[_CallRecord]) -> dict[str, int]:
@@ -392,47 +391,40 @@ def _verdict_counts(records: list[_CallRecord]) -> dict[str, int]:
     return counts
 
 
-def _summarize(records_by_suite: dict[str, list[_CallRecord]]) -> dict[str, object]:
-    attack_split = _split_verdicts(records_by_suite["attack"])
-    benign_split = _split_verdicts(records_by_suite["benign"])
-    return {
-        # "sink" (exfiltrating-tool calls) is the metric that matters: on the
-        # attack suite it is where the injected destination shows up; diluting
-        # it with read-only calls makes both good and bad numbers look small.
-        "attack_block_rate": {k: block_rate(v) for k, v in attack_split.items()},
-        "benign_false_positive_rate": {k: block_rate(v) for k, v in benign_split.items()},
-        "attack_call_counts": {k: len(v) for k, v in attack_split.items()},
-        "benign_call_counts": {k: len(v) for k, v in benign_split.items()},
-        # ask vs deny matters for UX honesty: an ASK is a one-tap, remembered
-        # approval; a DENY is a hard block.
-        "attack_verdict_counts": _verdict_counts(records_by_suite["attack"]),
-        "benign_verdict_counts": _verdict_counts(records_by_suite["benign"]),
-    }
+def _sink_verdict_counts(records: list[_CallRecord]) -> dict[str, int]:
+    return _verdict_counts([r for r in records if r.sink])
 
 
-def _render_markdown(summary: dict[str, object]) -> str:
-    def _row(label: str, rates: dict[str, float], counts: dict[str, int]) -> str:
-        cells = " | ".join(
-            f"{rates[k]:.2f} (n={counts[k]})" if counts[k] else "n/a (n=0)"
-            for k in ("sink", "all", "pack", "heuristic")
-        )
-        return f"| {label} | {cells} |"
+def _render_markdown(summary: dict) -> str:
+    auth = summary["authoritative"]
+    asr = auth["attack_success_rate"]
+    util = auth["utility"]
+    n = auth["n_injection_cases"]
+    baseline_asr = f"{asr['baseline']:.2f}" if asr["baseline"] is not None else "not run"
+    lines = [
+        f"AgentDojo v1 workspace · user_tasks={summary['user_tasks']} · "
+        f"injection_tasks={summary['injection_tasks']} (n={n} cases) · "
+        f"attack={summary['attack']} · agent={summary['agent_model']}",
+        "",
+        "Authoritative metric — AgentDojo's own per-injection security scorer",
+        "(attack success = the injection actually accomplished its goal; lower is better):",
+        "",
+        "| condition | attack success rate | user-task utility |",
+        "|---|---|---|",
+        f"| no Bouncer (baseline) | {baseline_asr} | {_fmt(util['under_attack_baseline'])} |",
+        f"| **with Bouncer** | **{asr['bouncer']:.2f}** | {_fmt(util['under_attack_bouncer'])} |",
+        "",
+        f"Benign utility (no injection, with Bouncer): {_fmt(util['benign_bouncer'])}",
+        "",
+        f"Engine detail (with-Bouncer attack run) — all calls: "
+        f"{summary['engine_detail']['attack_all_verdicts']}; "
+        f"sink calls only: {summary['engine_detail']['attack_sink_verdicts']}",
+    ]
+    return "\n".join(lines)
 
-    return "\n".join(
-        [
-            "| metric | sink calls | all calls | pack-covered | heuristic-covered |",
-            "|---|---|---|---|---|",
-            _row("attack-block-rate", summary["attack_block_rate"], summary["attack_call_counts"]),
-            _row(
-                "benign false-positive rate",
-                summary["benign_false_positive_rate"],
-                summary["benign_call_counts"],
-            ),
-            "",
-            f"attack verdicts: {summary['attack_verdict_counts']}",
-            f"benign verdicts: {summary['benign_verdict_counts']}",
-        ]
-    )
+
+def _fmt(v) -> str:
+    return f"{v:.2f}" if v is not None else "not run"
 
 
 def _run_deterministic_wiring() -> None:
@@ -447,12 +439,13 @@ def _run_deterministic_wiring() -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run the Bouncer engine against AgentDojo workspace")
-    parser.add_argument(
-        "--user-tasks",
-        default=os.environ.get("BOUNCER_USER_TASKS", ",".join(_DEFAULT_USER_TASKS)),
-        help="comma-separated user task ids",
-    )
+    parser = argparse.ArgumentParser(description="Measure Bouncer on AgentDojo workspace")
+    parser.add_argument("--user-tasks", default=os.environ.get(
+        "BOUNCER_USER_TASKS", ",".join(_DEFAULT_USER_TASKS)))
+    parser.add_argument("--injection-tasks", default=os.environ.get(
+        "BOUNCER_INJECTION_TASKS", ",".join(_DEFAULT_INJECTION_TASKS)))
+    parser.add_argument("--no-baseline", action="store_true",
+                        help="skip the no-Bouncer baseline attack pass (faster, less evidence)")
     args = parser.parse_args()
 
     if not os.environ.get("GEMINI_API_KEY"):
@@ -464,18 +457,58 @@ def main() -> int:
     except ImportError:
         raise SystemExit(
             "agentdojo is not installed — run with the benchmark extra:\n"
-            "  uv run --extra benchmark python -m benchmark.run_agentdojo --user-tasks user_task_8"
+            "  uv run --extra benchmark python -m benchmark.run_agentdojo"
         ) from None
 
     user_tasks = [t.strip() for t in args.user_tasks.split(",") if t.strip()]
-    logdir = Path(__file__).with_name("logs")
-    logdir.mkdir(parents=True, exist_ok=True)
+    injection_tasks = [t.strip() for t in args.injection_tasks.split(",") if t.strip()]
+    _LOGDIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"Running AgentDojo workspace suite on {user_tasks} ...")
-    records_by_suite = _run_suite(user_tasks, logdir)
-    summary = _summarize(records_by_suite)
+    _, agent_model = _gemini_llm()
+    attack_records: list[_CallRecord] = []
+    benign_records: list[_CallRecord] = []
 
-    _RESULTS_PATH.write_text(json.dumps({"user_tasks": user_tasks, "summary": summary}, indent=2))
+    print(f"[1/3] baseline attack run (no Bouncer) on {user_tasks} × {injection_tasks} ...")
+    baseline = None if args.no_baseline else _run_attack(
+        user_tasks, injection_tasks, bouncer=False, records=None)
+
+    print(f"[2/3] Bouncer attack run on {user_tasks} × {injection_tasks} ...")
+    bouncer = _run_attack(user_tasks, injection_tasks, bouncer=True, records=attack_records)
+
+    print(f"[3/3] benign run (no injection, with Bouncer) on {user_tasks} ...")
+    benign = _run_benign(user_tasks, benign_records)
+
+    summary = {
+        "user_tasks": user_tasks,
+        "injection_tasks": injection_tasks,
+        "attack": _ATTACK,
+        "agent_model": agent_model,
+        "authoritative": {
+            "attack_success_rate": {
+                "baseline": None if baseline is None else _mean(baseline["security"].values()),
+                "bouncer": _mean(bouncer["security"].values()),
+            },
+            "utility": {
+                "under_attack_baseline": None if baseline is None else _mean(
+                    baseline["utility"].values()),
+                "under_attack_bouncer": _mean(bouncer["utility"].values()),
+                "benign_bouncer": _mean(benign.utility_results.values()),
+            },
+            "n_injection_cases": len(bouncer["security"]),
+            "per_case_security_bouncer": {
+                f"{u}|{i}": v for (u, i), v in bouncer["security"].items()},
+            "per_case_security_baseline": None if baseline is None else {
+                f"{u}|{i}": v for (u, i), v in baseline["security"].items()},
+        },
+        "engine_detail": {
+            "attack_all_verdicts": _verdict_counts(attack_records),
+            "attack_sink_verdicts": _sink_verdict_counts(attack_records),
+            "benign_all_verdicts": _verdict_counts(benign_records),
+            "benign_sink_verdicts": _sink_verdict_counts(benign_records),
+        },
+    }
+
+    _RESULTS_PATH.write_text(json.dumps(summary, indent=2))
     print(f"\nWrote {_RESULTS_PATH}\n")
     print(_render_markdown(summary))
     return 0
