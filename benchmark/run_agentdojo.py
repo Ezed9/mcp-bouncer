@@ -160,21 +160,54 @@ def _schema_for(runtime: "FunctionsRuntime", name: str) -> dict[str, object]:
     return {"properties": dict.fromkeys(fn.parameters.model_fields.keys(), {})}
 
 
+_thinking_patched = False
+
+
+def _disable_gemini_thinking(google_llm_module: object) -> None:
+    """Force thinking off in AgentDojo's Gemini calls.
+
+    Thinking-enabled Gemini models (2.5+/3.x flash) now require a
+    `thought_signature` to be echoed back on every function-call part across
+    turns. AgentDojo's bundled GoogleLLM predates that requirement and doesn't
+    round-trip it, so multi-turn tool use fails with a 400 INVALID_ARGUMENT.
+    Disabling thinking (`thinking_budget=0`) sidesteps the signature requirement
+    entirely and keeps function calling working on the free tier. We patch the
+    module's `chat_completion_request` (which `GoogleLLM.query` calls) rather
+    than editing site-packages, so the fix ships with this repo.
+    """
+    global _thinking_patched
+    if _thinking_patched:
+        return
+    from google.genai import types as genai_types
+
+    original = google_llm_module.chat_completion_request
+
+    def patched(model, client, contents, generation_config):  # type: ignore[no-untyped-def]
+        generation_config.thinking_config = genai_types.ThinkingConfig(thinking_budget=0)
+        return original(model, client, contents, generation_config)
+
+    google_llm_module.chat_completion_request = patched
+    _thinking_patched = True
+
+
 def _build_pipeline(engine: ContractEngine, records: list[_CallRecord], pack_tools: set[str]):
     from google import genai
 
     from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, load_system_message
     from agentdojo.agent_pipeline.basic_elements import InitQuery, SystemMessage
+    from agentdojo.agent_pipeline.llms import google_llm
     from agentdojo.agent_pipeline.llms.google_llm import GoogleLLM
     from agentdojo.agent_pipeline.tool_execution import ToolsExecutionLoop
 
+    _disable_gemini_thinking(google_llm)
+
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    llm = GoogleLLM("gemini-2.5-flash", client=client)
+    llm = GoogleLLM("gemini-3.5-flash", client=client)
     system_message = SystemMessage(load_system_message(None))
     init_query = InitQuery()
     tools_loop = ToolsExecutionLoop([_make_recording_tools_executor(engine, records, pack_tools), llm])
     pipeline = AgentPipeline([system_message, init_query, llm, tools_loop])
-    pipeline.name = "bouncer-gated"
+    pipeline.name = "AI model developed by Google"
     return pipeline
 
 
