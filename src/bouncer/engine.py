@@ -25,11 +25,20 @@ def _normeq(s: str) -> str:
 
 
 def _scalar_dests(value: object) -> list[str]:
-    # Flatten a sink arg into its scalar destination strings. A list/tuple (the
-    # normal multi-recipient shape) is all destinations; nested lists flatten too.
-    if isinstance(value, (list, tuple)):
+    # Flatten a sink arg into its scalar destination strings. A list/tuple/set
+    # (multi-recipient shapes) is all destinations; a dict (a structured
+    # recipient like {"email": ...}) contributes its values; nested containers
+    # flatten recursively. Flattening — rather than str()-ing the container —
+    # keeps each address exposed to taint's substring match so a tainted
+    # address nested in a structure still DENYs instead of downgrading to ASK.
+    if isinstance(value, (list, tuple, set, frozenset)):
         out: list[str] = []
         for item in value:
+            out.extend(_scalar_dests(item))
+        return out
+    if isinstance(value, dict):
+        out = []
+        for item in value.values():
             out.extend(_scalar_dests(item))
         return out
     return [str(value)]
