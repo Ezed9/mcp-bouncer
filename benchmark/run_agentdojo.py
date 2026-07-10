@@ -176,6 +176,21 @@ def _is_daily_quota(exc: object) -> bool:
     return "perday" in str(exc).lower()
 
 
+def _available_models(client: object) -> list[str]:
+    """Model ids this key can call with generateContent (flash-class first)."""
+    if client is None:
+        return []
+    try:
+        names = [
+            m.name.removeprefix("models/")
+            for m in client.models.list()
+            if "generateContent" in (getattr(m, "supported_actions", None) or [])
+        ]
+    except Exception:  # noqa: BLE001 — listing is best-effort diagnostics
+        return []
+    return sorted(names, key=lambda n: (("flash" not in n), n))
+
+
 def _call_with_rate_limit_retry(original, *args):  # type: ignore[no-untyped-def]
     """Call AgentDojo's request fn, waiting out free-tier 429s.
 
@@ -190,6 +205,16 @@ def _call_with_rate_limit_retry(original, *args):  # type: ignore[no-untyped-def
         try:
             return original(*args)
         except ClientError as exc:
+            if getattr(exc, "code", None) == 404:
+                model = args[0] if args else "<model>"
+                available = _available_models(args[1] if len(args) > 1 else None)
+                listing = "\n".join(f"  {name}" for name in available) or "  (could not list models)"
+                raise SystemExit(
+                    f"\nModel {model} is not available to this API key.\n"
+                    f"Models your key CAN use with generateContent:\n{listing}\n"
+                    "Re-run with one of them (prefer a flash-class model):\n"
+                    "  BOUNCER_GEMINI_MODEL=<model> uv run python -m benchmark.run_agentdojo --user-tasks user_task_8"
+                ) from exc
             if getattr(exc, "code", None) != 429 or attempt == 11:
                 raise
             if _is_daily_quota(exc):
