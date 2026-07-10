@@ -2,6 +2,7 @@
 benchmark/audit.jsonl
 benchmark/audit-*.jsonl
 benchmark/results.json
+benchmark/results-raw.json
 benchmark/logs/
 
 # local smoke-test scratch (contains machine-specific absolute paths)

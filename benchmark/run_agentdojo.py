@@ -309,7 +309,7 @@ def _gemini_llm():
     return GoogleLLM(model, client=client), model
 
 
-def _pipeline(llm, tools_executor):
+def _pipeline(llm, tools_executor, name_suffix: str):
     from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, load_system_message
     from agentdojo.agent_pipeline.basic_elements import InitQuery, SystemMessage
     from agentdojo.agent_pipeline.tool_execution import ToolsExecutionLoop
@@ -319,24 +319,26 @@ def _pipeline(llm, tools_executor):
         [SystemMessage(load_system_message(None)), InitQuery(), llm, tools_loop]
     )
     # AgentDojo's attack loader resolves the model by finding a known model-id
-    # KEY as a substring of pipeline.name; label with one that maps to Google's
-    # prose name so the injection is addressed identically regardless of the
-    # actual model id.
-    pipeline.name = "gemini-2.0-flash-001"
+    # KEY as a substring of pipeline.name (base_attacks.get_model_name_from_pipeline),
+    # so we keep "gemini-2.0-flash-001" as a substring. The suffix makes the
+    # baseline and Bouncer pipelines write to DISTINCT log directories — without
+    # it they collide on the same path and the second run silently overwrites
+    # the first, destroying the comparison.
+    pipeline.name = f"gemini-2.0-flash-001{name_suffix}"
     return pipeline
 
 
 def _build_bouncer_pipeline(records: list[_CallRecord], audit_name: str):
     llm, _ = _gemini_llm()
     engine = _build_engine(audit_name)
-    return _pipeline(llm, _make_recording_tools_executor(engine, records))
+    return _pipeline(llm, _make_recording_tools_executor(engine, records), "-bouncer")
 
 
 def _build_baseline_pipeline():
     from agentdojo.agent_pipeline.tool_execution import ToolsExecutor
 
     llm, _ = _gemini_llm()
-    return _pipeline(llm, ToolsExecutor())
+    return _pipeline(llm, ToolsExecutor(), "-baseline")
 
 
 def _mean(values) -> float:
@@ -481,6 +483,26 @@ def main() -> int:
     print(f"[3/3] benign run (no injection, with Bouncer) on {user_tasks} ...")
     benign = _run_benign(user_tasks, benign_records)
 
+    # Persist raw verdicts the instant the (expensive, rate-limited) passes
+    # finish — before any summary math — so a bug in summarising can never
+    # again throw away a completed run's data.
+    def _pairs(d: dict[tuple[str, str], bool]) -> dict[str, bool]:
+        return {f"{u}|{i}": v for (u, i), v in d.items()}
+
+    def _sec_util(res: dict) -> dict[str, dict[str, bool]]:
+        return {
+            f"{u}|{i}": {"security": res["security"][(u, i)], "utility": res["utility"][(u, i)]}
+            for (u, i) in res["security"]
+        }
+
+    _raw_path = _RESULTS_PATH.with_name("results-raw.json")
+    _raw_path.write_text(json.dumps({
+        "baseline": None if baseline is None else _sec_util(baseline),
+        "bouncer": _sec_util(bouncer),
+        "benign_utility": _pairs(benign["utility_results"]),
+    }, indent=2))
+    print(f"Raw verdicts saved to {_raw_path}")
+
     summary = {
         "user_tasks": user_tasks,
         "injection_tasks": injection_tasks,
@@ -495,7 +517,7 @@ def main() -> int:
                 "under_attack_baseline": None if baseline is None else _mean(
                     baseline["utility"].values()),
                 "under_attack_bouncer": _mean(bouncer["utility"].values()),
-                "benign_bouncer": _mean(benign.utility_results.values()),
+                "benign_bouncer": _mean(benign["utility_results"].values()),
             },
             "n_injection_cases": len(bouncer["security"]),
             "per_case_security_bouncer": {
