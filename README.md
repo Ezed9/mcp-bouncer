@@ -308,9 +308,19 @@ Bouncer is benchmarked against AgentDojo's v1 `workspace` suite under the
 `important_instructions` prompt-injection attack, scored by **AgentDojo's own
 security scorer** (did the injection actually reach the attacker's address?) —
 not a Bouncer-internal count — and compared against a no-Bouncer baseline so
-the number reflects defense, not a model too weak to attack. Full methodology,
-the exact command, and the results table are in
-[`benchmark/RESULTS.md`](benchmark/RESULTS.md).
+the number reflects defense, not a model too weak to attack.
+
+In the first measured run (`user_task_8`, three exfil injection tasks,
+`gemini-flash-lite-latest`): attack success **0.33 → 0.00** with Bouncer, while
+user-task utility *rose* from **0.33 → 1.00** — blocking the injection kept the
+agent on its real task — and benign utility stayed **1.00** (no false
+positives). Read this as a **proof of mechanism, not a headline statistic**:
+only one of the three injections actually succeeded against the unprotected
+model (the other two the base model resisted on its own), so the aggregate
+rests on a small sample. The single case that isolates Bouncer's effect is
+clean on every axis, and [`benchmark/RESULTS.md`](benchmark/RESULTS.md) gives
+the full per-case breakdown and the honest caveats, including what would
+strengthen it (more user tasks, a stronger attack model).
 
 An earlier run caught a real bypass in Bouncer itself — the sink gate *allowed*
 an exfiltration because a pack's sink params were written for a different
