@@ -12,3 +12,6 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# local launch/marketing notes — never publish to the OSS repo
+docs/launch-posts.md
