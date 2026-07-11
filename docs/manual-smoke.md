@@ -40,7 +40,7 @@ below for provenance.**
 ## Environment / setup (all commands really run)
 
 ```bash
-cd /Users/nishit/Desktop/Projects/Fable/bouncer
+cd /path/to/bouncer
 node --version   # v25.2.1
 npx --version    # 11.6.2
 mkdir -p smoke_work/out
@@ -54,7 +54,7 @@ Throwaway client config (`smoke_work/mcp-config.json`), before wrapping:
     "filesystem": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem",
-               "/Users/nishit/Desktop/Projects/Fable/bouncer/smoke_work"]
+               "/path/to/bouncer/smoke_work"]
     }
   }
 }
@@ -73,12 +73,12 @@ original launch command under the `x-bouncer-upstream` sentinel:
 "filesystem": {
   "command": "bouncer",
   "args": ["run", "--config",
-           "/Users/nishit/Desktop/Projects/Fable/bouncer/smoke_work/mcp-config.json",
+           "/path/to/bouncer/smoke_work/mcp-config.json",
            "--upstream-name", "filesystem"],
   "x-bouncer-upstream": {
     "command": "npx",
     "args": ["-y", "@modelcontextprotocol/server-filesystem",
-             "/Users/nishit/Desktop/Projects/Fable/bouncer/smoke_work"]
+             "/path/to/bouncer/smoke_work"]
   }
 }
 ```
@@ -430,7 +430,7 @@ above), so the deny-unless-trusted sink gate cannot be shown against it. No fake
 ## Reproduce it yourself
 
 ```bash
-cd /Users/nishit/Desktop/Projects/Fable/bouncer
+cd /path/to/bouncer
 mkdir -p smoke_work/out
 # (smoke_work/ is NOT committed — its paths are machine-specific. Create
 #  smoke_work/mcp-config.json and smoke_work/user-policy.yaml as shown in the

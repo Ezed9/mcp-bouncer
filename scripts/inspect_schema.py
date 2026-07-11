@@ -3,11 +3,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-BASE = "/Users/nishit/Desktop/Projects/Fable/bouncer/smoke_work"
+# Directory the filesystem server is allowed to serve. Override with
+# BOUNCER_SMOKE_DIR; defaults to a `smoke_work/` dir beside the repo root.
+BASE = os.environ.get(
+    "BOUNCER_SMOKE_DIR", str(Path(__file__).resolve().parents[1] / "smoke_work")
+)
 
 
 async def main() -> None:
