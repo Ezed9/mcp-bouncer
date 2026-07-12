@@ -185,8 +185,12 @@ def _retry_delay_seconds(exc: object, default: float = 30.0) -> float:
 
 
 def _is_daily_quota(exc: object) -> bool:
-    """True when the 429's quota violation is a per-DAY cap (waiting is futile)."""
-    return "perday" in str(exc).lower()
+    """True when the 429's quota violation is a per-DAY cap (waiting is futile).
+
+    Covers Gemini ('PerDay' quotaId) and Groq/OpenAI-style 'tokens per day
+    (TPD)' / 'requests per day (RPD)' daily limits."""
+    msg = str(exc).lower()
+    return any(s in msg for s in ("perday", "per day", "(tpd)", "(rpd)"))
 
 
 def _available_models(client: object) -> list[str]:
@@ -361,6 +365,16 @@ def _patch_openai_rate_limit(openai_llm_module) -> None:
             try:
                 return original(*args, **kwargs)
             except openai.RateLimitError as exc:
+                if _is_daily_quota(exc):
+                    raise SystemExit(
+                        "\nDaily free-tier limit reached (per-day tokens/requests) — waiting "
+                        "will not help.\nGroq's free tier (100K tokens/DAY) is too small for "
+                        "AgentDojo's token-heavy prompts.\nOptions:\n"
+                        "  1. Use Gemini (BOUNCER_LLM=gemini, GEMINI_API_KEY=...) — its free "
+                        "tier handles this.\n"
+                        "  2. A paid Groq/OpenAI/DeepSeek key.\n"
+                        "  3. Wait for the daily reset and re-run."
+                    ) from exc
                 if attempt == 11:
                     raise
                 delay = _retry_delay_seconds(exc, default=20.0)
