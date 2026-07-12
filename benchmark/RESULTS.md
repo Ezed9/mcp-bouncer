@@ -120,12 +120,22 @@ reviews. See the git history for the full arc.
 
 ## Reproduce
 
+No Gemini key required — pick any provider with `BOUNCER_LLM` (default
+`gemini`); model with `BOUNCER_MODEL`:
+
 ```bash
 cd bouncer
+
+# Gemini (free key, no card: https://aistudio.google.com/apikey)
 GEMINI_API_KEY=... uv run --extra benchmark python -m benchmark.run_agentdojo
+
+# Groq — FREE tier, no card, higher limits (https://console.groq.com/keys)
+BOUNCER_LLM=groq GROQ_API_KEY=... uv run --extra benchmark python -m benchmark.run_agentdojo
+
+# Any OpenAI-compatible provider also works: openai, deepseek, openrouter
+BOUNCER_LLM=deepseek DEEPSEEK_API_KEY=... uv run --extra benchmark python -m benchmark.run_agentdojo
 ```
 
 Writes `results.json` (summary) and `results-raw.json` (per-case verdicts,
 saved the instant the passes finish). Flags: `--user-tasks`,
-`--injection-tasks` (comma lists), `--no-baseline`. Free Gemini key, no credit
-card: https://aistudio.google.com/apikey.
+`--injection-tasks` (comma lists), `--no-baseline`.

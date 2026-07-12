@@ -25,14 +25,20 @@ task shows up as a utility drop, not as a flattering block rate.
 Engine-level verdict counts (allow/ask/deny) are kept as *supplementary*
 detail — useful colour, but NOT the headline claim.
 
-`agentdojo` and `google.genai` are imported ONLY inside the GEMINI_API_KEY-gated
-path, so the no-key path imports and runs fine without agentdojo installed
-(it is an optional `[benchmark]` extra).
+`agentdojo` and the provider SDKs are imported ONLY inside the key-gated path,
+so the no-key path imports and runs fine without agentdojo installed (it is an
+optional `[benchmark]` extra).
 
-Run (live):  cd bouncer && GEMINI_API_KEY=... uv run --extra benchmark \
-                 python -m benchmark.run_agentdojo
-Run (no key): cd bouncer && uv run python -m benchmark.run_agentdojo   # scorer unit test only
-Free key (no credit card): https://aistudio.google.com/apikey
+Provider is chosen with BOUNCER_LLM (default 'gemini'); model with BOUNCER_MODEL.
+Any OpenAI-compatible endpoint works — 'groq' (FREE tier, no card), 'openai',
+'deepseek', 'openrouter' — so you don't need a Gemini key at all:
+
+Run (Gemini):  cd bouncer && GEMINI_API_KEY=... uv run --extra benchmark \
+                   python -m benchmark.run_agentdojo
+Run (Groq):    cd bouncer && BOUNCER_LLM=groq GROQ_API_KEY=... uv run --extra \
+                   benchmark python -m benchmark.run_agentdojo
+Run (no key):  cd bouncer && uv run python -m benchmark.run_agentdojo   # scorer test only
+Free Gemini key: https://aistudio.google.com/apikey · Free Groq key: https://console.groq.com/keys
 """
 
 from __future__ import annotations
@@ -304,9 +310,89 @@ def _gemini_llm():
     # Default verified callable on a free-tier key (2026-07). Avoid
     # gemini-2.5/2.0-flash (404 "no longer available to new users" on new keys)
     # and gemini-3.5-flash (20 req/DAY free tier). Override with
-    # BOUNCER_GEMINI_MODEL; on a 404 the driver prints your key's real menu.
-    model = os.environ.get("BOUNCER_GEMINI_MODEL", "gemini-flash-lite-latest")
+    # BOUNCER_MODEL; on a 404 the driver prints your key's real menu.
+    model = os.environ.get("BOUNCER_MODEL", os.environ.get(
+        "BOUNCER_GEMINI_MODEL", "gemini-flash-lite-latest"))
     return GoogleLLM(model, client=client), model
+
+
+# Known OpenAI-compatible endpoints. Any of these lets you run the benchmark
+# on a free or cheap key instead of Gemini — pick with BOUNCER_LLM.
+_OPENAI_COMPATIBLE = {
+    # Groq: genuinely free tier, no card, Llama with tool calling, generous RPM.
+    "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+    "openai": ("OPENAI_API_KEY", None, "gpt-4o-mini"),
+    "deepseek": ("DEEPSEEK_API_KEY", "https://api.deepseek.com", "deepseek-chat"),
+    "openrouter": (
+        "OPENROUTER_API_KEY",
+        "https://openrouter.ai/api/v1",
+        "meta-llama/llama-3.3-70b-instruct",
+    ),
+}
+
+_openai_retry_patched = False
+
+
+def _patch_openai_rate_limit(openai_llm_module) -> None:
+    """Wrap AgentDojo's OpenAI request fn to wait out free-tier rate limits.
+
+    AgentDojo already retries (3 attempts, exp backoff); a hammered free tier can
+    outlast that, so we add a longer, explicit wait — mirroring the Gemini path."""
+    global _openai_retry_patched
+    if _openai_retry_patched:
+        return
+    import openai
+
+    original = openai_llm_module.chat_completion_request
+
+    def patched(*args, **kwargs):
+        for attempt in range(10):
+            try:
+                return original(*args, **kwargs)
+            except openai.RateLimitError as exc:
+                if attempt == 9:
+                    raise
+                delay = _retry_delay_seconds(exc, default=20.0)
+                print(f"  rate-limited (429); waiting {delay:.0f}s then retrying ...")
+                time.sleep(delay)
+        raise RuntimeError("rate-limit retries exhausted")  # pragma: no cover
+
+    openai_llm_module.chat_completion_request = patched
+    _openai_retry_patched = True
+
+
+def _openai_compatible_llm(provider: str):
+    import openai
+    from agentdojo.agent_pipeline.llms import openai_llm
+    from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
+
+    if provider not in _OPENAI_COMPATIBLE:
+        raise SystemExit(
+            f"Unknown BOUNCER_LLM={provider!r}. Options: gemini, "
+            f"{', '.join(_OPENAI_COMPATIBLE)}."
+        )
+    key_env, base_url, default_model = _OPENAI_COMPATIBLE[provider]
+    api_key = os.environ.get(key_env)
+    if not api_key:
+        raise SystemExit(
+            f"BOUNCER_LLM={provider} needs {key_env} set.\n"
+            + ("Get a free Groq key (no card): https://console.groq.com/keys"
+               if provider == "groq" else f"Set {key_env} to your {provider} API key.")
+        )
+    _patch_openai_rate_limit(openai_llm)
+    client = openai.OpenAI(api_key=api_key, base_url=base_url)
+    model = os.environ.get("BOUNCER_MODEL", default_model)
+    return OpenAILLM(client, model), model
+
+
+def _build_llm():
+    """(llm, model_label) for the configured provider. BOUNCER_LLM selects it;
+    default 'gemini'. Non-Gemini providers use AgentDojo's OpenAI-compatible
+    pipeline, so no Gemini key is required."""
+    provider = os.environ.get("BOUNCER_LLM", "gemini").lower()
+    if provider == "gemini":
+        return _gemini_llm()
+    return _openai_compatible_llm(provider)
 
 
 def _pipeline(llm, tools_executor, name_suffix: str):
@@ -329,7 +415,7 @@ def _pipeline(llm, tools_executor, name_suffix: str):
 
 
 def _build_bouncer_pipeline(records: list[_CallRecord], audit_name: str):
-    llm, _ = _gemini_llm()
+    llm, _ = _build_llm()
     engine = _build_engine(audit_name)
     return _pipeline(llm, _make_recording_tools_executor(engine, records), "-bouncer")
 
@@ -337,7 +423,7 @@ def _build_bouncer_pipeline(records: list[_CallRecord], audit_name: str):
 def _build_baseline_pipeline():
     from agentdojo.agent_pipeline.tool_execution import ToolsExecutor
 
-    llm, _ = _gemini_llm()
+    llm, _ = _build_llm()
     return _pipeline(llm, ToolsExecutor(), "-baseline")
 
 
@@ -432,11 +518,21 @@ def _fmt(v) -> str:
     return f"{v:.2f}" if v is not None else "not run"
 
 
+def _llm_key_env() -> str:
+    """The API-key env var the configured provider needs."""
+    provider = os.environ.get("BOUNCER_LLM", "gemini").lower()
+    if provider == "gemini":
+        return "GEMINI_API_KEY"
+    if provider in _OPENAI_COMPATIBLE:
+        return _OPENAI_COMPATIBLE[provider][0]
+    return "GEMINI_API_KEY"
+
+
 def _run_deterministic_wiring() -> None:
     import subprocess
     import sys
 
-    print("GEMINI_API_KEY not set — running the scorer unit test only.\n")
+    print(f"{_llm_key_env()} not set — running the scorer unit test only.\n")
     subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "tests/test_benchmark_scorer.py"],
         check=False,
@@ -453,7 +549,7 @@ def main() -> int:
                         help="skip the no-Bouncer baseline attack pass (faster, less evidence)")
     args = parser.parse_args()
 
-    if not os.environ.get("GEMINI_API_KEY"):
+    if not os.environ.get(_llm_key_env()):
         _run_deterministic_wiring()
         return 0
 
@@ -469,7 +565,7 @@ def main() -> int:
     injection_tasks = [t.strip() for t in args.injection_tasks.split(",") if t.strip()]
     _LOGDIR.mkdir(parents=True, exist_ok=True)
 
-    _, agent_model = _gemini_llm()
+    _, agent_model = _build_llm()
     attack_records: list[_CallRecord] = []
     benign_records: list[_CallRecord] = []
 
