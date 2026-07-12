@@ -334,10 +334,17 @@ _openai_retry_patched = False
 
 
 def _patch_openai_rate_limit(openai_llm_module) -> None:
-    """Wrap AgentDojo's OpenAI request fn to wait out free-tier rate limits.
+    """Wrap AgentDojo's OpenAI request fn to survive two free-tier realities:
 
-    AgentDojo already retries (3 attempts, exp backoff); a hammered free tier can
-    outlast that, so we add a longer, explicit wait — mirroring the Gemini path."""
+    1. Rate limits — AgentDojo retries only 3x; a hammered free tier outlasts
+       that, so we add a longer explicit wait (mirrors the Gemini path).
+    2. `tool_use_failed` — smaller models (e.g. Llama on Groq) sometimes emit a
+       MALFORMED tool call that the provider rejects with a 400. AgentDojo does
+       NOT retry BadRequestError, so one bad generation kills the whole task.
+       This is an infrastructure failure, not a security outcome, and at
+       temperature 0 a naive retry reproduces the identical bad output — so we
+       retry with a temperature nudge (arg index 5) so the model varies and
+       escapes the trap. The first attempt keeps AgentDojo's temperature."""
     global _openai_retry_patched
     if _openai_retry_patched:
         return
@@ -345,17 +352,29 @@ def _patch_openai_rate_limit(openai_llm_module) -> None:
 
     original = openai_llm_module.chat_completion_request
 
+    def _with_temperature(args, temperature):
+        return (*args[:5], temperature, *args[6:]) if len(args) > 5 else args
+
     def patched(*args, **kwargs):
-        for attempt in range(10):
+        tool_fail_attempts = 0
+        for attempt in range(12):
             try:
                 return original(*args, **kwargs)
             except openai.RateLimitError as exc:
-                if attempt == 9:
+                if attempt == 11:
                     raise
                 delay = _retry_delay_seconds(exc, default=20.0)
                 print(f"  rate-limited (429); waiting {delay:.0f}s then retrying ...")
                 time.sleep(delay)
-        raise RuntimeError("rate-limit retries exhausted")  # pragma: no cover
+            except openai.BadRequestError as exc:
+                if "tool_use_failed" not in str(exc) or tool_fail_attempts >= 5:
+                    raise
+                tool_fail_attempts += 1
+                temperature = min(0.2 * tool_fail_attempts, 1.0)
+                print(f"  model emitted a malformed tool call; retrying at "
+                      f"temperature={temperature:.1f} ...")
+                args = _with_temperature(args, temperature)
+        raise RuntimeError("openai retries exhausted")  # pragma: no cover
 
     openai_llm_module.chat_completion_request = patched
     _openai_retry_patched = True
