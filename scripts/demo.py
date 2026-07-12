@@ -59,8 +59,8 @@ def main() -> None:
     show(engine, "(attacker@evil.com came only from untrusted content → tainted)",
          "attacker@evil.com", "Your code is 271956")
 
-    print(f"{DIM}No LLM decided this — it's plain Python over a taint log. "
-          f"Every verdict is in /tmp/bouncer-demo-audit.jsonl.{RESET}\n")
+    print(f"{DIM}No LLM decided this — it's plain Python over a taint log, "
+          f"and every verdict is written to an append-only audit trail.{RESET}\n")
 
 
 if __name__ == "__main__":

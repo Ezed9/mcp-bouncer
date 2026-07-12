@@ -8,6 +8,13 @@
 **The only tool that asks whether *this destination* should receive *this
 value* — not whether this tool is allowed to run.**
 
+![Bouncer allows an email to a trusted teammate but denies the same tool
+sending to an attacker address that only appeared in a poisoned inbox — decided
+by provenance, no LLM](docs/demo.png)
+
+> Same tool, opposite verdicts — decided only by where the address came from.
+> Reproduce it yourself: `uv run python scripts/demo.py` (no API key).
+
 Bouncer is a local **stdio MCP proxy**. It sits between your MCP client
 (Claude Code, Cursor, or any MCP-speaking agent) and your existing tool
 servers, re-exports every tool 1:1, and **deterministically enforces
