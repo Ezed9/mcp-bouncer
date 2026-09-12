@@ -1,12 +1,12 @@
 [project]
 name = "bouncer-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "A local stdio MCP proxy that enforces bouncer-core's contracts on every tool call"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
-    "bouncer-core==0.1.0",
+    "bouncer-core==0.1.1",
     "anyio>=4.0",
     "mcp>=1.10",
 ]

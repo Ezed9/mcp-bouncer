@@ -1,6 +1,6 @@
 [project]
 name = "bouncer-core"
-version = "0.1.0"
+version = "0.1.1"
 description = "Deterministic contract enforcement for agent tool calls: gates the destination, not the tool. No LLM in the decision path."
 readme = "README.md"
 requires-python = ">=3.12"

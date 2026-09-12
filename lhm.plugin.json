@@ -1,7 +1,7 @@
 {
   "identifier": "ezed9-mcp-bouncer",
   "name": "Bouncer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deterministic contract enforcement for agent tool calls: gates the destination, not the tool. No LLM in the decision path.",
   "homepage": "https://github.com/Ezed9/mcp-bouncer",
   "author": "Ezed9",
@@ -22,7 +22,9 @@
       "description": "Evaluate a hypothetical tool call against Bouncer's deterministic security contracts and return the verdict (ALLOW, DENY, or ASK) with the underlying reason, without executing the tool.",
       "inputSchema": {
         "type": "object",
-        "required": ["tool"],
+        "required": [
+          "tool"
+        ],
         "properties": {
           "tool": {
             "type": "string",
@@ -34,7 +36,9 @@
           },
           "untrusted_context": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "List of untrusted strings currently in context (from prior tool outputs)."
           },
           "user_policy_yaml": {
@@ -49,7 +53,9 @@
       "description": "Validate a YAML policy string against Bouncer's schema and report syntax validity, contract rules count, and covered tools.",
       "inputSchema": {
         "type": "object",
-        "required": ["policy_yaml"],
+        "required": [
+          "policy_yaml"
+        ],
         "properties": {
           "policy_yaml": {
             "type": "string",
