@@ -1,4 +1,4 @@
-# bouncer-mcp/src/bouncer_mcp/proxy.py
+# bouncer/src/bouncer/proxy.py
 """The async stdio MCP proxy shell.
 
 `route_call` is the pure, SDK-free routing decision (fully unit-tested). The
@@ -31,6 +31,15 @@ from bouncer.engine import ContractEngine
 from bouncer.policy import PolicyResolver, builtin_pack_paths, load_policies
 from bouncer.taint import TaintTracker
 from bouncer.types import ToolCall, Verdict
+
+from .server import (
+    get_builtin_prompts,
+    get_builtin_resources,
+    get_builtin_tools,
+    handle_builtin_prompt,
+    handle_builtin_resource,
+    handle_builtin_tool_call,
+)
 
 # forward(call) -> upstream result text.
 Forward = Callable[[ToolCall], str]
@@ -151,9 +160,15 @@ def _build_resolver(user_policy: Path | None = None) -> PolicyResolver:
 class BouncerProxy:
     """Stdio MCP proxy that gates one upstream server behind the engine."""
 
-    def __init__(self, engine: ContractEngine, session: ClientSession) -> None:
+    def __init__(
+        self,
+        engine: ContractEngine,
+        session: ClientSession,
+        user_policy: Path | None = None,
+    ) -> None:
         self._engine = engine
         self._upstream = session
+        self._user_policy = user_policy
 
     @classmethod
     async def serve(
@@ -204,23 +219,32 @@ class BouncerProxy:
                 audit=AuditLog(_DEFAULT_AUDIT_PATH),
                 schemas=schemas,
             )
-            proxy = cls(engine, session)
+            proxy = cls(engine, session, user_policy=user_policy)
             await proxy._run_server(server_name, tools)
 
     async def _run_server(
         self, server_name: str, tools: list[mcp_types.Tool]
     ) -> None:
         server: Server = Server(server_name)
+        builtin_tools = get_builtin_tools()
+        builtin_names = {t.name for t in builtin_tools}
 
         @server.list_tools()
         async def _list_tools() -> list[mcp_types.Tool]:
-            # Re-export the upstream tools 1:1.
-            return tools
+            # Re-export the upstream tools 1:1, alongside Bouncer's management tools.
+            return tools + builtin_tools
 
         @server.call_tool()
         async def _call_tool(
             name: str, arguments: dict[str, object]
         ) -> mcp_types.CallToolResult:
+            if name in builtin_names:
+                res = handle_builtin_tool_call(
+                    name, arguments, user_policy=self._user_policy
+                )
+                if res is not None:
+                    return res
+
             ctx = server.request_context
             call = ToolCall(tool=name, args=arguments)
 
@@ -242,6 +266,30 @@ class BouncerProxy:
             # ALLOW/ASK-approved: `result` is the upstream CallToolResult,
             # relayed verbatim (content + structuredContent + isError).
             return result
+
+        @server.list_prompts()
+        async def _list_prompts() -> list[mcp_types.Prompt]:
+            return get_builtin_prompts()
+
+        @server.get_prompt()
+        async def _get_prompt(
+            name: str, arguments: dict[str, str] | None
+        ) -> mcp_types.GetPromptResult:
+            res = handle_builtin_prompt(name, arguments)
+            if res is not None:
+                return res
+            raise ValueError(f"Unknown prompt {name}")
+
+        @server.list_resources()
+        async def _list_resources() -> list[mcp_types.Resource]:
+            return get_builtin_resources()
+
+        @server.read_resource()
+        async def _read_resource(uri: str) -> mcp_types.ReadResourceResult:
+            res = handle_builtin_resource(uri)
+            if res is not None:
+                return res
+            raise ValueError(f"Unknown resource {uri}")
 
         options = server.create_initialization_options(
             notification_options=NotificationOptions()

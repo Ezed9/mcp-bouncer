@@ -1,6 +1,8 @@
 # bouncer/tests/test_engine_constraints.py
 from pathlib import Path
 
+import pytest
+
 from bouncer.approvals import ApprovalStore
 from bouncer.audit import AuditLog
 from bouncer.engine import ContractEngine
@@ -25,6 +27,34 @@ def test_unknown_tool_asks(tmp_path: Path) -> None:
     d = eng.evaluate(ToolCall(tool="mystery", args={}))
     assert d.verdict == Verdict.ASK
     assert d.contract == "pinning"
+
+
+def test_register_schema_pins_a_tool_after_construction(tmp_path: Path) -> None:
+    """The engine retains the caller's `schemas` dict by reference, so mutating
+    it works -- but relying on that is relying on an implementation detail. This
+    is the supported way to pin a tool the caller learns about later."""
+    eng = _engine(tmp_path, {}, schemas={})
+    assert eng.evaluate(ToolCall(tool="late", args={})).verdict == Verdict.ASK
+
+    eng.register_schema("late", {})
+    assert eng.evaluate(ToolCall(tool="late", args={})).verdict == Verdict.ALLOW
+
+
+def test_registering_the_same_schema_twice_is_idempotent(tmp_path: Path) -> None:
+    eng = _engine(tmp_path, {}, schemas={})
+    eng.register_schema("tool", {"type": "object"})
+    eng.register_schema("tool", {"type": "object"})
+    assert eng.evaluate(ToolCall(tool="tool", args={})).verdict == Verdict.ALLOW
+
+
+def test_a_pin_cannot_be_silently_changed(tmp_path: Path) -> None:
+    """A pin that can be quietly overwritten is not a pin. Re-registering a
+    DIFFERENT schema for an already-pinned tool is the shape of a rug-pull, so
+    it is refused rather than accepted."""
+    eng = _engine(tmp_path, {}, schemas={})
+    eng.register_schema("tool", {"type": "object"})
+    with pytest.raises(ValueError, match="already pinned"):
+        eng.register_schema("tool", {"type": "object", "extra": True})
 
 
 def test_write_outside_prefix_is_denied(tmp_path: Path) -> None:

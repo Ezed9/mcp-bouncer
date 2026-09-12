@@ -5,6 +5,10 @@ evaluate() runs, in order: schema pinning (unknown/changed tool -> ask), call
 budgets, per-argument constraints, then the deny-unless-trusted sink gate
 (Task 9). Every call is audited. No LLM, no network, no I/O beyond the audit
 append — this module is the load-bearing safety boundary.
+
+ContractEngine is STATEFUL and NOT SYNCHRONIZED: call counts, the taint
+tracker's recorded outputs and the approval store all mutate on every call.
+Concurrent `evaluate()` would race the budget. Drive it from one task.
 """
 
 from __future__ import annotations
@@ -67,6 +71,26 @@ class ContractEngine:
         self._audit = audit
         self._schemas = schemas
         self._counts: dict[str, int] = {}
+
+    def register_schema(self, tool: str, schema: dict[str, object]) -> None:
+        """Pin a tool the caller learns about after construction.
+
+        `schemas` is retained BY REFERENCE, so mutating the dict you passed in
+        also works -- but that is an implementation detail, and this is the
+        supported way. A tool that is not pinned gets ASK, never ALLOW.
+
+        Re-registering an identical schema is idempotent. Re-registering a
+        DIFFERENT one raises: a pin that can be silently overwritten is not a
+        pin, and a schema that changes under an already-approved tool is the
+        shape this engine exists to refuse.
+        """
+        existing = self._schemas.get(tool)
+        if existing is not None and existing != schema:
+            raise ValueError(
+                f"{tool!r} is already pinned to a different schema; "
+                "re-pinning would silently change what was approved"
+            )
+        self._schemas[tool] = schema
 
     def register_output(self, text: str) -> None:
         self._taint.record_output(text)

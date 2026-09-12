@@ -1,5 +1,6 @@
 # Bouncer
 
+[![MCP Badge](https://lobehub.com/badge/mcp/ezed9-mcp-bouncer)](https://lobehub.com/mcp/ezed9-mcp-bouncer)
 [![CI](https://github.com/Ezed9/mcp-bouncer/actions/workflows/ci.yml/badge.svg)](https://github.com/Ezed9/mcp-bouncer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
@@ -65,8 +66,8 @@ Every tool call resolves to exactly one of:
   only asks once per destination.
 
 A `deny` verdict never calls into the upstream server — a blocked call has no
-side effects (`bouncer-mcp/src/bouncer_mcp/proxy.py`'s `route_call` /
-`_route_async`; enforced by `bouncer-mcp/tests/test_proxy.py`).
+side effects (`bouncer/src/bouncer/proxy.py`'s `route_call` / `_route_async`;
+enforced by `tests/test_proxy.py`).
 
 ## What it enforces
 
@@ -137,11 +138,68 @@ file.
 > (`bouncer/src/bouncer/packs/*.yaml`) and add to it. See
 > [`examples/bouncer.yaml`](examples/bouncer.yaml).
 
+## MCP Tools (Skills)
+
+Bouncer exposes native MCP tools that allow AI agents and developers to inspect security postures, evaluate hypothetical tool calls, and validate policy contracts:
+
+| Tool | Description | Key Arguments |
+| :--- | :--- | :--- |
+| `bouncer_check_verdict` | Evaluates a hypothetical tool call against deterministic contracts and returns the verdict (`allow`, `deny`, or `ask`) without executing it. | `tool` (string, required), `args` (object), `untrusted_context` (string[]), `user_policy_yaml` (string) |
+| `bouncer_verify_policy` | Validates a declarative YAML contract policy against Bouncer's schema, reporting syntax validity and covered tool rules. | `policy_yaml` (string, required) |
+| `bouncer_get_active_policies` | Lists active security packs (`filesystem`, `email`, `bash`, `http`) and user policies currently enforced. | `pack_name` (string, optional) |
+| `bouncer_audit_summary` | Returns a summary and recent log entries of security decisions from the local audit trail (`~/.bouncer/audit.jsonl`). | `limit` (integer, default 20) |
+
+## MCP Prompts
+
+Interactive prompt templates for security review and policy authoring:
+
+- **`review_mcp_security`**: Guided evaluation of an MCP server's exposed tools to uncover dangerous data exfiltration sinks, unsanitized parameters, and excessive privileges.
+- **`generate_bouncer_policy`**: Interactive assistant that generates a hardened, declarative `policy.yaml` tailored to your MCP servers and desired risk tolerance (`standard`, `strict`, `paranoid`).
+
+## MCP Resources
+
+Direct access to Bouncer's security state and configuration:
+
+- **`bouncer://policies/builtin`** (`application/json`): Catalog of active built-in security packs and rule schemas for filesystem, email, bash, and http tools.
+- **`bouncer://audit/summary`** (`application/json`): Aggregated audit metrics and recent enforcement decisions from the local audit log.
+
 ## Install and use
 
+### Installation
+
 ```bash
-# 1. Point bouncer at your existing MCP client config (Claude Code, Cursor, ...)
-#    and wrap the servers you want gated:
+# Using pip from GitHub
+pip install git+https://github.com/Ezed9/mcp-bouncer.git
+
+# Or using uv
+uv tool install git+https://github.com/Ezed9/mcp-bouncer.git
+
+# Or from local source
+git clone https://github.com/Ezed9/mcp-bouncer.git
+cd mcp-bouncer
+pip install -e .
+```
+
+### 1. Standalone MCP Server Mode
+
+You can run Bouncer directly as an MCP server in Claude Desktop, Cursor, or LobeHub to access its policy validation and security auditing tools:
+
+```json
+{
+  "mcpServers": {
+    "bouncer": {
+      "command": "bouncer",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+### 2. Proxy Mode (Wrapping Existing MCP Servers)
+
+```bash
+# Point bouncer at your existing MCP client config (Claude Code, Cursor, ...)
+# and wrap the servers you want gated:
 bouncer init --config path/to/mcp-config.json
 
 # bouncer init rewrites each server entry in place: the original launch

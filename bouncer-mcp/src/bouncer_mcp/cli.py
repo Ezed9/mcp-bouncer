@@ -1,4 +1,4 @@
-# bouncer-mcp/src/bouncer_mcp/cli.py
+# bouncer/src/bouncer/cli.py
 """CLI: `bouncer init` (wrap servers in a client config) and `bouncer run`.
 
 `rewrite_config` is pure and idempotent -- it stashes the ENTIRE original
@@ -119,9 +119,19 @@ def _cmd_run(
     return 0
 
 
+def _cmd_serve(user_policy: Path | None = None) -> int:
+    from .server import run_standalone_server  # deferred: avoids importing MCP for `init`
+
+    anyio.run(run_standalone_server, "bouncer", user_policy)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="bouncer")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    parser = argparse.ArgumentParser(
+        prog="bouncer",
+        description="Bouncer: deterministic contract enforcement and security tools for MCP.",
+    )
+    sub = parser.add_subparsers(dest="cmd")
 
     init = sub.add_parser("init", help="wrap MCP servers in a client config")
     init.add_argument("--config", type=Path, required=True)
@@ -136,11 +146,20 @@ def main(argv: list[str] | None = None) -> int:
         help="optional user contract YAML, layered over the builtin packs",
     )
 
+    serve = sub.add_parser("serve", help="run the standalone Bouncer MCP server over stdio")
+    serve.add_argument(
+        "--policy", "--user-policy", dest="policy", type=Path, default=None,
+        help="optional user contract YAML, layered over the builtin packs",
+    )
+
     ns = parser.parse_args(argv)
     if ns.cmd == "init":
         return _cmd_init(ns.config, ns.server)
     if ns.cmd == "run":
         return _cmd_run(ns.config, ns.upstream_name, ns.policy)
+    if ns.cmd == "serve" or ns.cmd is None:
+        policy = getattr(ns, "policy", None)
+        return _cmd_serve(policy)
     return 2
 
 

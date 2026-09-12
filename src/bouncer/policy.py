@@ -86,6 +86,15 @@ class PolicyResolver:
         self._use_heuristics = use_heuristics
 
     def policy_for(self, name: str, input_schema: dict[str, object]) -> ToolPolicy:
+        """Resolve a policy: explicit override, then heuristics, then nothing.
+
+        With `use_heuristics=False` an unknown tool falls through to a fully
+        permissive `ToolPolicy(name=name)`. That is safe ONLY because
+        `ContractEngine` checks pinning first and ASKs for any tool it was not
+        given a schema for, so this branch is never reached for an unknown
+        tool. **That ordering is load-bearing.** A caller using PolicyResolver
+        outside the engine must do its own catalog check first.
+        """
         if name in self._overrides:
             return self._overrides[name]
         if self._use_heuristics:
