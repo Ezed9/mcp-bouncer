@@ -10,8 +10,7 @@ wrapper around these).
 import json
 
 import pytest
-
-from bouncer.cli import _upstream_from_config, main, rewrite_config
+from bouncer_mcp.cli import _upstream_from_config, main, rewrite_config
 
 
 def test_rewrite_wraps_server_and_preserves_original() -> None:
@@ -172,7 +171,7 @@ def test_init_emits_runnable_args(tmp_path, monkeypatch) -> None:
         seen["user_policy"] = user_policy
         return 0
 
-    monkeypatch.setattr("bouncer.cli._cmd_run", fake_cmd_run)
+    monkeypatch.setattr("bouncer_mcp.cli._cmd_run", fake_cmd_run)
     run_rc = main(entry["args"])
     assert run_rc == 0
     assert str(seen["config_path"]) == resolved

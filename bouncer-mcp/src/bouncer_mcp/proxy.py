@@ -1,4 +1,4 @@
-# bouncer/src/bouncer/proxy.py
+# bouncer-mcp/src/bouncer_mcp/proxy.py
 """The async stdio MCP proxy shell.
 
 `route_call` is the pure, SDK-free routing decision (fully unit-tested). The
@@ -25,12 +25,12 @@ from mcp.client.stdio import stdio_client
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.stdio import stdio_server
 
-from .approvals import ApprovalStore
-from .audit import AuditLog
-from .engine import ContractEngine
-from .policy import PolicyResolver, builtin_pack_paths, load_policies
-from .taint import TaintTracker
-from .types import ToolCall, Verdict
+from bouncer.approvals import ApprovalStore
+from bouncer.audit import AuditLog
+from bouncer.engine import ContractEngine
+from bouncer.policy import PolicyResolver, builtin_pack_paths, load_policies
+from bouncer.taint import TaintTracker
+from bouncer.types import ToolCall, Verdict
 
 # forward(call) -> upstream result text.
 Forward = Callable[[ToolCall], str]

@@ -265,7 +265,7 @@ upstream was never reached. The `/etc` DENY is now Bouncer's *own* constraint
 
 ### Finding 1 — the proxy cannot load a user-policy YAML
 
-`BouncerProxy.serve` (`src/bouncer/proxy.py`, ~line 151) builds its engine as:
+`BouncerProxy.serve` (`bouncer-mcp/src/bouncer_mcp/proxy.py`, ~line 151) builds its engine as:
 
 ```python
 engine = ContractEngine(
@@ -323,7 +323,7 @@ outputSchema: {"type":"object","properties":{"content":{"type":"string"}},"requi
 ```
 
 The proxy re-exports the upstream tools 1:1 (`_run_server` returns the original
-`tools` list, including their `outputSchema`, `src/bouncer/proxy.py` ~line 169),
+`tools` list, including their `outputSchema`, `bouncer-mcp/src/bouncer_mcp/proxy.py` ~line 169),
 but its `_call_tool` handler returns only:
 
 ```python

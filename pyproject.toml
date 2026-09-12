@@ -1,27 +1,33 @@
 [project]
-name = "mcp-bouncer"
+name = "bouncer-core"
 version = "0.1.0"
-description = "A bouncer for your agent's tools: deterministic contract enforcement for MCP"
+description = "Deterministic contract enforcement for agent tool calls: gates the destination, not the tool. No LLM in the decision path."
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
-    "anyio>=4.0",
-    "mcp>=1.10",
     "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
 benchmark = ["agentdojo>=0.1.35"]
 
-[project.scripts]
-bouncer = "bouncer.cli:main"
+[project.urls]
+Homepage = "https://github.com/Ezed9/mcp-bouncer"
+Issues = "https://github.com/Ezed9/mcp-bouncer/issues"
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
 
+# The MCP proxy is a separate distribution so that a consumer wanting only the
+# engine does not pull `mcp`, and through it uvicorn, starlette, pydantic and
+# pyjwt, for code it never calls. crawlgate was the first such consumer.
+[tool.uv.workspace]
+members = ["bouncer-mcp"]
+
 [tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests"]
+pythonpath = ["src", "bouncer-mcp/src"]
+testpaths = ["tests", "bouncer-mcp/tests"]
 asyncio_mode = "auto"
 
 [tool.ruff]

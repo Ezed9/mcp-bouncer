@@ -11,12 +11,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
 
@@ -24,7 +24,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --python ${{ matrix.python-version }}
+        run: uv sync --all-packages --python ${{ matrix.python-version }}
 
       - name: Lint (ruff)
         run: uv run ruff check .
@@ -34,3 +34,18 @@ jobs:
 
       - name: No-key benchmark path imports & scorer test
         run: uv run python -m benchmark.run_agentdojo
+
+      # The split exists so a consumer of the engine alone never installs the
+      # MCP SDK -- and through it uvicorn, starlette, pydantic and pyjwt. That
+      # is a property of the dependency graph, so assert it against a real
+      # install rather than trusting the pyproject to stay honest.
+      - name: bouncer-core must not pull the MCP tree
+        run: |
+          uv venv /tmp/core-only --python ${{ matrix.python-version }}
+          VIRTUAL_ENV=/tmp/core-only uv pip install .
+          VIRTUAL_ENV=/tmp/core-only uv pip list > /tmp/core-only.txt
+          cat /tmp/core-only.txt
+          if grep -qiE '^(mcp|anyio|uvicorn|starlette|pydantic|pyjwt|mcp-types)[[:space:]]' /tmp/core-only.txt; then
+            echo "::error::bouncer-core has regained a dependency the split removed"
+            exit 1
+          fi

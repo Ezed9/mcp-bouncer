@@ -1,4 +1,4 @@
-# bouncer/src/bouncer/cli.py
+# bouncer-mcp/src/bouncer_mcp/cli.py
 """CLI: `bouncer init` (wrap servers in a client config) and `bouncer run`.
 
 `rewrite_config` is pure and idempotent -- it stashes the ENTIRE original

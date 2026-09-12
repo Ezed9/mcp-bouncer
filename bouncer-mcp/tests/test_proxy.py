@@ -9,12 +9,12 @@ vouch for a *different*, still-tainted destination in a multi-recipient call.
 from pathlib import Path
 
 import mcp.types as mcp_types
+from bouncer_mcp.proxy import BouncerProxy, _build_resolver, route_call
 
 from bouncer.approvals import ApprovalStore
 from bouncer.audit import AuditLog
 from bouncer.engine import ContractEngine
 from bouncer.policy import PolicyResolver
-from bouncer.proxy import BouncerProxy, _build_resolver, route_call
 from bouncer.taint import TaintTracker
 from bouncer.types import ToolCall, ToolPolicy, Verdict
 

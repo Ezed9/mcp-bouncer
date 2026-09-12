@@ -65,8 +65,8 @@ Every tool call resolves to exactly one of:
   only asks once per destination.
 
 A `deny` verdict never calls into the upstream server — a blocked call has no
-side effects (`bouncer/src/bouncer/proxy.py`'s `route_call` / `_route_async`;
-enforced by `tests/test_proxy.py`).
+side effects (`bouncer-mcp/src/bouncer_mcp/proxy.py`'s `route_call` /
+`_route_async`; enforced by `bouncer-mcp/tests/test_proxy.py`).
 
 ## What it enforces
 
