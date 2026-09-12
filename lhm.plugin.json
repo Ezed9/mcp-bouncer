@@ -1,0 +1,111 @@
+{
+  "identifier": "ezed9-mcp-bouncer",
+  "name": "Bouncer",
+  "version": "0.1.0",
+  "description": "Deterministic contract enforcement for agent tool calls: gates the destination, not the tool. No LLM in the decision path.",
+  "homepage": "https://github.com/Ezed9/mcp-bouncer",
+  "author": "Ezed9",
+  "authorUrl": "https://github.com/Ezed9",
+  "category": "developer",
+  "icon": "https://github.com/Ezed9.png",
+  "tags": [
+    "mcp",
+    "security",
+    "contracts",
+    "proxy",
+    "prompt-injection",
+    "data-exfiltration"
+  ],
+  "tools": [
+    {
+      "name": "bouncer_check_verdict",
+      "description": "Evaluate a hypothetical tool call against Bouncer's deterministic security contracts and return the verdict (ALLOW, DENY, or ASK) with the underlying reason, without executing the tool.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["tool"],
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "Name of the tool being called (e.g. 'send_email', 'write_file')."
+          },
+          "args": {
+            "type": "object",
+            "description": "Arguments passed to the tool call."
+          },
+          "untrusted_context": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "List of untrusted strings currently in context (from prior tool outputs)."
+          },
+          "user_policy_yaml": {
+            "type": "string",
+            "description": "Optional YAML policy with custom contract overrides."
+          }
+        }
+      }
+    },
+    {
+      "name": "bouncer_verify_policy",
+      "description": "Validate a YAML policy string against Bouncer's schema and report syntax validity, contract rules count, and covered tools.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["policy_yaml"],
+        "properties": {
+          "policy_yaml": {
+            "type": "string",
+            "description": "YAML content defining tool policies."
+          }
+        }
+      }
+    },
+    {
+      "name": "bouncer_get_active_policies",
+      "description": "Inspect all active contract packs (builtin rules for filesystem, email, http, bash, etc.) and user overrides loaded by Bouncer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pack_name": {
+            "type": "string",
+            "description": "Optional name of a specific pack to inspect (e.g. 'filesystem')."
+          }
+        }
+      }
+    },
+    {
+      "name": "bouncer_audit_summary",
+      "description": "Retrieve recent audit log entries from Bouncer showing allowed, denied, and asked tool calls with their timestamps and reasons.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of recent entries to return (default: 20).",
+            "default": 20
+          }
+        }
+      }
+    }
+  ],
+  "prompts": [
+    {
+      "name": "review_mcp_security",
+      "description": "Evaluate an MCP server's security contracts, identifying potential data exfiltration channels, high-risk sinks, and missing path constraints."
+    },
+    {
+      "name": "generate_bouncer_policy",
+      "description": "Draft a declarative, deterministic YAML policy for Bouncer protecting against prompt injection and unauthorized destination exfiltration."
+    }
+  ],
+  "resources": [
+    {
+      "name": "Bouncer Builtin Policies",
+      "description": "Active curated security packs and deterministic contract schemas.",
+      "uri": "bouncer://policies/builtin"
+    },
+    {
+      "name": "Bouncer Audit Log Summary",
+      "description": "Recent audit trail of deterministic verdicts (ALLOW/DENY/ASK).",
+      "uri": "bouncer://audit/summary"
+    }
+  ]
+}
