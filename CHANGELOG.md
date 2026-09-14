@@ -6,7 +6,7 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 
 ## [Unreleased]
 
-## [0.1.2] - YYYY-MM-DD
+## [0.1.2] - 2026-09-14
 
 ### Fixed
 - `bouncer-mcp` crashed on startup for every fresh install: `mcp>=1.10` resolved
