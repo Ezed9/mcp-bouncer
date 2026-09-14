@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Upstream releases break installs without a commit here (mcp 2.0 did), so the
+  # fresh-resolution job also runs on a clock.
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -14,6 +21,9 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # No job pushes; a persisted token in .git/config is only exposure.
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
@@ -49,3 +59,26 @@ jobs:
             echo "::error::bouncer-core has regained a dependency the split removed"
             exit 1
           fi
+
+  # The lockfile pinned mcp 1.28.1, so CI stayed green while every fresh install
+  # of 0.1.1 resolved mcp 2.x and crashed. This job installs with no lockfile,
+  # exactly as `pip install bouncer-mcp` resolves today, and runs the suite on it.
+  fresh-resolution:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # No job pushes; a persisted token in .git/config is only exposure.
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+
+      - name: Install both packages with no lockfile
+        run: |
+          uv venv "$RUNNER_TEMP/fresh" --python 3.13
+          VIRTUAL_ENV="$RUNNER_TEMP/fresh" uv pip install --no-cache . ./bouncer-mcp pytest pytest-asyncio
+          VIRTUAL_ENV="$RUNNER_TEMP/fresh" uv pip list
+
+      - name: Test against the fresh install
+        run: '"$RUNNER_TEMP/fresh/bin/python" -m pytest -q'

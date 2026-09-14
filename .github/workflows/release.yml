@@ -15,9 +15,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          enable-cache: true
+          # A cache restored into the job that builds what PyPI publishes is a
+          # poisoning path; a clean resolve costs seconds.
+          enable-cache: false
 
       # Checked before the build, so a mistyped tag costs seconds rather than a
       # failed upload. --frozen keeps this a pure read: no re-lock, no sync.
