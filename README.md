@@ -168,16 +168,15 @@ Direct access to Bouncer's security state and configuration:
 ### Installation
 
 ```bash
-# Using pip from GitHub
-pip install git+https://github.com/Ezed9/mcp-bouncer.git
+# The MCP proxy, CLI and standalone server
+uv tool install bouncer-mcp        # or: pipx install bouncer-mcp / pip install bouncer-mcp
 
-# Or using uv
-uv tool install git+https://github.com/Ezed9/mcp-bouncer.git
+# Only the contract engine, for use as a library (depends on pyyaml alone)
+pip install bouncer-core
 
-# Or from local source
-git clone https://github.com/Ezed9/mcp-bouncer.git
-cd mcp-bouncer
-pip install -e .
+# From source
+git clone https://github.com/Ezed9/mcp-bouncer.git && cd mcp-bouncer
+uv sync --all-packages
 ```
 
 ### 1. Standalone MCP Server Mode
