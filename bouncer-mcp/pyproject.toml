@@ -8,7 +8,10 @@ license = "MIT"
 dependencies = [
     "bouncer-core==0.1.1",
     "anyio>=4.0",
-    "mcp>=1.10",
+    # mcp 2.0 (2026-07-28) removed the low-level Server decorators this proxy is
+    # built on. Capped until the 2.x migration lands; 1.28 is the version CI
+    # has always run.
+    "mcp>=1.28,<2",
 ]
 
 [project.urls]

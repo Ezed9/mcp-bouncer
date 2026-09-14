@@ -137,7 +137,7 @@ dependencies = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
     { name = "bouncer-core", editable = "." },
-    { name = "mcp", specifier = ">=1.10" },
+    { name = "mcp", specifier = ">=1.28,<2" },
 ]
 
 [[package]]
