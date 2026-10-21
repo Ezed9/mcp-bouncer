@@ -1,5 +1,5 @@
 # bouncer/src/bouncer/cli.py
-"""CLI: `bouncer init` (wrap servers in a client config) and `bouncer run`.
+"""CLI: `bouncer init` (wrap servers in a client config), `bouncer run`, `bouncer report`.
 
 `rewrite_config` is pure and idempotent -- it stashes the ENTIRE original
 server entry (command, args, and anything else on it -- `env`, `cwd`, ...)
@@ -18,6 +18,7 @@ import argparse
 import copy
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 import anyio
@@ -126,6 +127,30 @@ def _cmd_serve(user_policy: Path | None = None) -> int:
     return 0
 
 
+def _cmd_report(ns: argparse.Namespace) -> int:
+    from bouncer import __version__
+    from bouncer.policy import builtin_pack_paths, load_policies
+    from bouncer.report import build_report, load_tools, summarize_audit
+
+    report = build_report(
+        pack_policies=load_policies(builtin_pack_paths()),
+        user_policies=load_policies([ns.policy]) if ns.policy else {},
+        user_policy_path=ns.policy,
+        tools=load_tools(ns.tools) if ns.tools else None,
+        audit=summarize_audit(ns.audit, ns.since, ns.until),
+        benchmark=json.loads(ns.benchmark.read_text()) if ns.benchmark else None,
+        server_name=ns.server_name,
+        version=__version__,
+        generated_on=date.today(),
+    )
+    if ns.output is None:
+        print(report)
+    else:
+        ns.output.write_text(report + "\n")
+        print(f"Wrote {ns.output}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="bouncer",
@@ -152,9 +177,24 @@ def main(argv: list[str] | None = None) -> int:
         help="optional user contract YAML, layered over the builtin packs",
     )
 
+    report = sub.add_parser("report", help="write a Markdown security review pack")
+    report.add_argument("--policy", type=Path, default=None, help="user contract YAML")
+    report.add_argument("--tools", type=Path, default=None,
+                        help="the server's tools/list result as JSON")
+    report.add_argument("--audit", type=Path, default=Path.home() / ".bouncer" / "audit.jsonl")
+    report.add_argument("--since", type=date.fromisoformat, default=None, help="YYYY-MM-DD")
+    report.add_argument("--until", type=date.fromisoformat, default=None, help="YYYY-MM-DD")
+    report.add_argument("--benchmark", type=Path, default=None,
+                        help="a benchmark results JSON (e.g. benchmark/results-*.json)")
+    report.add_argument("--server-name", default=None)
+    report.add_argument("-o", "--output", type=Path, default=None,
+                        help="output file (default: stdout)")
+
     ns = parser.parse_args(argv)
     if ns.cmd == "init":
         return _cmd_init(ns.config, ns.server)
+    if ns.cmd == "report":
+        return _cmd_report(ns)
     if ns.cmd == "run":
         return _cmd_run(ns.config, ns.upstream_name, ns.policy)
     if ns.cmd == "serve" or ns.cmd is None:

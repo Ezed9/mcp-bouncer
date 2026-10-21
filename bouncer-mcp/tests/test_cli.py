@@ -176,3 +176,21 @@ def test_init_emits_runnable_args(tmp_path, monkeypatch) -> None:
     assert run_rc == 0
     assert str(seen["config_path"]) == resolved
     assert seen["server_name"] == "filesystem"
+
+
+def test_report_writes_markdown_file(tmp_path) -> None:
+    policy = tmp_path / "policy.yaml"
+    policy.write_text("write_file:\n  write_params: [path]\n  allowed_path_prefixes: [./out]\n")
+    tools = tmp_path / "tools.json"
+    tools.write_text(json.dumps({"tools": [
+        {"name": "write_file", "inputSchema": {"properties": {"path": {}}}}]}))
+    out = tmp_path / "report.md"
+    rc = main(["report", "--policy", str(policy), "--tools", str(tools),
+               "--audit", str(tmp_path / "none.jsonl"), "--server-name", "demo",
+               "-o", str(out)])
+    assert rc == 0
+    text = out.read_text()
+    assert text.startswith("# MCP security review pack: demo")
+    assert "## 2. Tool inventory and controls" in text
+    assert "No audit log found" in text
+    assert "OWASP LLM Top 10" in text
