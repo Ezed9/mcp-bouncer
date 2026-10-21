@@ -1,0 +1,12 @@
+# Bouncer policy for the demo helpdesk server (helpdesk_server.py).
+send_email:
+  exfiltrating: true
+  sink_params: [to]
+  trusted_destinations: [support@acme.example]
+
+write_file:
+  write_params: [path]
+  allowed_path_prefixes: [workspace]
+
+delete_customer:
+  max_calls: 1
