@@ -360,6 +360,12 @@ def _patch_openai_rate_limit(openai_llm_module) -> None:
         return (*args[:5], temperature, *args[6:]) if len(args) > 5 else args
 
     def patched(*args, **kwargs):
+        # AgentDojo sends the system prompt as role "developer" (OpenAI-only);
+        # open-weight chat templates such as Qwen's reject it with a 400.
+        if len(args) > 2:
+            messages = [{**m, "role": "system"} if m.get("role") == "developer" else m
+                        for m in args[2]]
+            args = (*args[:2], messages, *args[3:])
         tool_fail_attempts = 0
         for attempt in range(12):
             try:
