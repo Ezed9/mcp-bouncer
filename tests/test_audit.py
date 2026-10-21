@@ -20,3 +20,4 @@ def test_write_appends_one_json_line_per_entry(tmp_path: Path) -> None:
     assert first["tool"] == "send_email"
     assert first["verdict"] == "deny"
     assert first["contract"] == "sink_gate"
+    assert first["ts"].endswith("+00:00")

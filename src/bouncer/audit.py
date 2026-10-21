@@ -9,6 +9,7 @@ feature; in v1 it is simply always on.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .types import AuditEntry
@@ -21,6 +22,7 @@ class AuditLog:
 
     def write(self, entry: AuditEntry) -> None:
         record = {
+            "ts": datetime.now(UTC).isoformat(timespec="seconds"),
             "tool": entry.tool,
             "args": entry.args,
             "verdict": entry.verdict,
