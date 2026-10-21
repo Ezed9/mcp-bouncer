@@ -17,7 +17,13 @@ Homepage = "https://github.com/Ezed9/mcp-bouncer"
 Issues = "https://github.com/Ezed9/mcp-bouncer/issues"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
+dev = [
+    "mypy>=2.3.1",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "types-pyyaml>=6.0.12.20260906",
+]
 
 # The MCP proxy is a separate distribution so that a consumer wanting only the
 # engine does not pull `mcp`, and through it uvicorn, starlette, pydantic and

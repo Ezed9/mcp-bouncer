@@ -21,6 +21,7 @@ import mcp.types as mcp_types
 import yaml
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.stdio import stdio_server
+from pydantic import AnyUrl
 
 from bouncer.approvals import ApprovalStore
 from bouncer.audit import AuditLog
@@ -368,13 +369,13 @@ def get_builtin_resources() -> list[mcp_types.Resource]:
     """Return Bouncer's native MCP resources."""
     return [
         mcp_types.Resource(
-            uri="bouncer://policies/builtin",
+            uri=AnyUrl("bouncer://policies/builtin"),
             name="Bouncer Builtin Policies",
             description="Active curated security packs and deterministic contract schemas.",
             mimeType="application/json",
         ),
         mcp_types.Resource(
-            uri="bouncer://audit/summary",
+            uri=AnyUrl("bouncer://audit/summary"),
             name="Bouncer Audit Log Summary",
             description="Recent audit trail of deterministic verdicts (ALLOW/DENY/ASK).",
             mimeType="application/json",
@@ -392,7 +393,7 @@ def handle_builtin_resource(uri: str) -> mcp_types.ReadResourceResult | None:
         return mcp_types.ReadResourceResult(
             contents=[
                 mcp_types.TextResourceContents(
-                    uri=uri,
+                    uri=AnyUrl(uri),
                     mimeType="application/json",
                     text=json.dumps(data, indent=2),
                 )
@@ -417,7 +418,7 @@ def handle_builtin_resource(uri: str) -> mcp_types.ReadResourceResult | None:
         return mcp_types.ReadResourceResult(
             contents=[
                 mcp_types.TextResourceContents(
-                    uri=uri,
+                    uri=AnyUrl(uri),
                     mimeType="application/json",
                     text=json.dumps(summary, indent=2),
                 )

@@ -12,6 +12,8 @@ dependencies = [
     # built on. Capped until the 2.x migration lands; 1.28 is the version CI
     # has always run.
     "mcp>=1.28,<2",
+    # Imported directly for AnyUrl; mcp 1.x already requires pydantic 2.
+    "pydantic>=2,<3",
 ]
 
 [project.urls]
