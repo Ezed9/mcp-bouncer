@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 369" width="800" height="369" role="img" aria-labelledby="t d" aria-label="What happened in each attack case" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<title id="t">What happened in each attack case</title>
+<desc id="d">Two full-length bars. Without Bouncer: 48 attack succeeded, 58 sent to attacker but not scored a success, the rest no send to the attacker, of 164. With Bouncer: 0 succeeded, 0 sent to attacker, 124 Bouncer refused a send or share, the rest no send attempted, of 163.</desc>
+<style>:root{--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#6b6a66;--grid:#e1e0d9;--axis:#c3c2b7;--band:#f3f2ee;--succeeded:#d03b3b;--received:#eda100;--denied:#2a78d6;--none:#c3c2b7;--without:#6b6a66;}@media (prefers-color-scheme: dark){:root:not(.light){--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#a3a29c;--grid:#2c2c2a;--axis:#4a4a46;--band:#232321;--succeeded:#d03b3b;--received:#c98500;--denied:#3987e5;--none:#4a4a46;--without:#a3a29c;}}:root.dark{--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#a3a29c;--grid:#2c2c2a;--axis:#4a4a46;--band:#232321;--succeeded:#d03b3b;--received:#c98500;--denied:#3987e5;--none:#4a4a46;--without:#a3a29c;}.bg{fill:var(--surface)}.ink{fill:var(--ink)}.ink2{fill:var(--ink2)}.muted{fill:var(--muted)}.grid{stroke:var(--grid)}.axis{stroke:var(--axis)}.band{fill:var(--band)}.ring{stroke:var(--surface)}.ink-stroke{stroke:var(--ink2);fill:none}.without{fill:var(--without)}.without-s{stroke:var(--without)}.bouncer{fill:var(--denied)}.bouncer-s{stroke:var(--denied)}.on-dark{fill:#ffffff}.on-light{fill:#0b0b0b}.on-none{fill:var(--ink)}.marker{fill:var(--ink2)}.s-succeeded{fill:var(--succeeded)}.s-received{fill:var(--received)}.s-denied{fill:var(--denied)}.s-none{fill:var(--none)}.s-missing{fill:none;stroke:var(--muted);stroke-width:1}</style>
+<rect x="0" y="0" width="800" height="369" class="bg" rx="8"/>
+<text x="20" y="32" class="ink" font-size="18" font-weight="600">What happened in each attack case</text>
+<text x="20" y="54" class="ink2" font-size="13">Every case is counted once; both bars run the full set of cases with a result. Counts are inside the bars.</text>
+<text x="20" y="94.2" class="ink" font-size="14" font-weight="600">Without Bouncer</text>
+<text x="140.04" y="94.2" class="muted" font-size="12">164 cases</text>
+<path d="M20,125.2 V120.2 H509.22 V125.2" class="ink-stroke" stroke-width="1"/>
+<text x="20" y="115.2" class="ink2" font-size="12">Send to the attacker ran: 106/164 (64.6%, 95% CI 56.8%–71.9%), of which AgentDojo scored 48 a success</text>
+<g><title>Without Bouncer: attack succeeded: 48/164</title><rect x="20" y="128.2" width="220.44" height="24" class="s-succeeded"/></g>
+<text x="28" y="144.7" class="on-dark" font-size="13" font-weight="600">48</text>
+<g><title>Without Bouncer: send to attacker ran, not scored a success: 58/164</title><rect x="242.44" y="128.2" width="266.78" height="24" class="s-received"/></g>
+<text x="250.44" y="144.7" class="on-light" font-size="13" font-weight="600">58</text>
+<g><title>Without Bouncer: no send to the attacker: 58/164</title><path class="s-none" d="M511.22,128.2 H776 Q780,128.2 780,132.2 V148.2 Q780,152.2 776,152.2 H511.22 Z"/></g>
+<text x="519.22" y="144.7" class="on-none" font-size="13" font-weight="600">58</text>
+<text x="20" y="169.2" class="ink2" font-size="12">attack succeeded</text>
+<text x="242.44" y="169.2" class="ink2" font-size="12">send to attacker ran, not scored a success</text>
+<text x="511.22" y="169.2" class="ink2" font-size="12">no send to the attacker</text>
+<text x="20" y="207.2" class="ink" font-size="14" font-weight="600">With Bouncer</text>
+<text x="119.56" y="207.2" class="muted" font-size="12">163 cases</text>
+<text x="20" y="233.2" class="ink" font-size="13" font-weight="600">Attack succeeded: 0/163 (95% CI 0%–2.2%) · sent to attacker: 0/163</text>
+<g><title>With Bouncer: Bouncer refused a send/share: 124/163</title><rect x="20" y="241.2" width="576.16" height="24" class="s-denied"/></g>
+<text x="28" y="257.7" class="on-dark" font-size="13" font-weight="600">124</text>
+<g><title>With Bouncer: no send attempted: 39/163</title><path class="s-none" d="M598.16,241.2 H776 Q780,241.2 780,245.2 V261.2 Q780,265.2 776,265.2 H598.16 Z"/></g>
+<text x="606.16" y="257.7" class="on-none" font-size="13" font-weight="600">39</text>
+<text x="20" y="282.2" class="ink2" font-size="12">Bouncer refused a send/share</text>
+<text x="598.16" y="282.2" class="ink2" font-size="12">no send attempted</text>
+<text x="20" y="312.2" class="muted" font-size="12">Refused: at least one send_email or share_file call in the case was denied. Over all Bouncer cases, 614 such calls were denied, 7 held</text>
+<text x="20" y="329.6" class="muted" font-size="12">for approval (no human, so not run) and 0 allowed. 23 of the 124 refused cases are sending tasks, where a refused call can be the</text>
+<text x="20" y="347" class="muted" font-size="12">user's own send. One model (openai/gpt-4o-mini), one fixed non-adaptive attack.</text>
+</svg>

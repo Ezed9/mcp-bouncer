@@ -6,6 +6,8 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-23
+
 ### Added
 - `bouncer report` writes a Markdown security review pack from a policy, the
   server's tool list and the audit log: tool inventory and controls, findings,
@@ -19,7 +21,18 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 - `bouncer-core` ships a `py.typed` marker, so type checkers read its types
   instead of treating it as untyped.
 
+### Security
+- Proxy mode no longer lists Bouncer's own `bouncer_*` tools, prompts or resources
+  to the agent. In 0.1.x they were answered before the engine, outside the audit
+  log, so a prompt-injected agent could call them (including
+  `bouncer_check_verdict`, which wrote to the audit log, and
+  `bouncer_audit_summary`). `bouncer serve`, the standalone server, is unchanged.
+
 ### Changed
+- The AgentDojo driver (`benchmark/run_agentdojo.py`) covers all 40 user tasks,
+  adds a benign pass without Bouncer, a cost cap, resumable per-case logs,
+  confidence intervals and a generated report and chart; the attack text now
+  addresses the agent neutrally. `benchmark/run_final.sh` reproduces the run.
 - `bouncer-mcp` declares `pydantic>=2,<3`, which it now imports directly.
   mcp 1.x already required it, so installs resolve the same.
 - The AgentDojo benchmark runs on open-weight models (such as Qwen), whose chat
@@ -29,12 +42,14 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 - The README is rewritten around what Bouncer enforces, with the demo
   recording at the top and a section for security reviewers. The technical
   reference moved to `docs/how-it-works.md`.
-- Benchmark results for `deepseek-v4-flash` (15 cases) and `gpt-oss-120b`
-  (3 cases) are committed under `benchmark/`.
-- A 15-case AgentDojo run did not hold up the earlier utility result. Bouncer
-  blocked the one attack that landed, but task completion fell from 8/15 to
-  5/15, and the pre-registered utility kill criterion probably trips. The README
-  and `benchmark/RESULTS.md` now say so.
+- The AgentDojo section of the README now reports the final run: `gpt-4o-mini`,
+  40 user tasks, 164 attack cases. The attacker's goal was reached in 48 cases
+  without Bouncer and 0 of 163 with it, but Bouncer allowed no send at all in
+  that run (so the 0 follows by construction), and the six tasks that send email
+  or share files went from 4/6 to 0/6. Charts, per-case results and the raw
+  rows are committed under `benchmark/` and `docs/assets/`. Earlier
+  `deepseek-v4-flash` (15 and 30 cases) and `gpt-oss-120b` results stay in
+  `benchmark/RESULTS.md` as history.
 
 ## [0.1.2] - 2026-09-14
 

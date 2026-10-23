@@ -4,8 +4,9 @@
 `route_call` is the pure, SDK-free routing decision (fully unit-tested). The
 `BouncerProxy` class wraps it in the MCP server/client glue: it connects to an
 upstream stdio MCP server as a *client*, pins each tool's schema at startup,
-re-exports the tools 1:1 on its own stdio *server*, and runs every incoming
-tools/call through `route_call`.
+re-exports the tools 1:1 on its own stdio *server* (and nothing else: no Bouncer
+management tools, prompts or resources are exposed to the agent), and runs every
+incoming tools/call through `route_call`.
 
 All safety lives in the engine; this module only forwards, denies, or asks. No
 LLM and no network/async in the decision path — the transport layer is the only
@@ -31,15 +32,6 @@ from bouncer.engine import ContractEngine
 from bouncer.policy import PolicyResolver, builtin_pack_paths, load_policies
 from bouncer.taint import TaintTracker
 from bouncer.types import ToolCall, Verdict
-
-from .server import (
-    get_builtin_prompts,
-    get_builtin_resources,
-    get_builtin_tools,
-    handle_builtin_prompt,
-    handle_builtin_resource,
-    handle_builtin_tool_call,
-)
 
 # forward(call) -> upstream result text.
 Forward = Callable[[ToolCall], str]
@@ -226,25 +218,20 @@ class BouncerProxy:
         self, server_name: str, tools: list[mcp_types.Tool]
     ) -> None:
         server: Server = Server(server_name)
-        builtin_tools = get_builtin_tools()
-        builtin_names = {t.name for t in builtin_tools}
 
+        # Proxy mode exposes ONLY the upstream tools. Bouncer's own management
+        # surface (bouncer_check_verdict, bouncer_audit_summary, ...) lives in
+        # `bouncer serve`; here it would be reachable by the very agent being
+        # constrained, outside the engine and the audit log, and could forge
+        # audit lines or read every wrapped server's logged arguments.
         @server.list_tools()
         async def _list_tools() -> list[mcp_types.Tool]:
-            # Re-export the upstream tools 1:1, alongside Bouncer's management tools.
-            return tools + builtin_tools
+            return tools
 
         @server.call_tool()
         async def _call_tool(
             name: str, arguments: dict[str, object]
         ) -> mcp_types.CallToolResult:
-            if name in builtin_names:
-                res = handle_builtin_tool_call(
-                    name, arguments, user_policy=self._user_policy
-                )
-                if res is not None:
-                    return res
-
             ctx = server.request_context
             call = ToolCall(tool=name, args=arguments)
 
@@ -256,40 +243,12 @@ class BouncerProxy:
                 return await self._upstream.call_tool(name, arguments)
 
             elicit = self._make_elicit(ctx)
-            result, verdict = await self._route_async(call, do_forward, elicit)
-            if verdict is Verdict.DENY:
-                # A Bouncer DENY: return an error result WITHOUT forwarding and
-                # WITHOUT fabricating structuredContent. Returning a
-                # CallToolResult directly makes the SDK relay it as-is (no
-                # outputSchema re-validation), so an unstructured error is fine.
-                return result
-            # ALLOW/ASK-approved: `result` is the upstream CallToolResult,
-            # relayed verbatim (content + structuredContent + isError).
+            result, _verdict = await self._route_async(call, do_forward, elicit)
+            # DENY: an error result returned WITHOUT forwarding and WITHOUT
+            # fabricated structuredContent (the SDK relays a returned
+            # CallToolResult as-is). ALLOW/ASK-approved: the upstream
+            # CallToolResult, relayed verbatim.
             return result
-
-        @server.list_prompts()
-        async def _list_prompts() -> list[mcp_types.Prompt]:
-            return get_builtin_prompts()
-
-        @server.get_prompt()
-        async def _get_prompt(
-            name: str, arguments: dict[str, str] | None
-        ) -> mcp_types.GetPromptResult:
-            res = handle_builtin_prompt(name, arguments)
-            if res is not None:
-                return res
-            raise ValueError(f"Unknown prompt {name}")
-
-        @server.list_resources()
-        async def _list_resources() -> list[mcp_types.Resource]:
-            return get_builtin_resources()
-
-        @server.read_resource()
-        async def _read_resource(uri: str) -> mcp_types.ReadResourceResult:
-            res = handle_builtin_resource(uri)
-            if res is not None:
-                return res
-            raise ValueError(f"Unknown resource {uri}")
 
         options = server.create_initialization_options(
             notification_options=NotificationOptions()

@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 433" width="800" height="433" role="img" aria-labelledby="t d" aria-label="The cost: task completion with and without Bouncer" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<title id="t">The cost: task completion with and without Bouncer</title>
+<desc id="d">no attack, sending tasks: 4/6 without Bouncer, 0/6 with; no attack, other tasks: 29/34 without Bouncer, 30/34 with; no attack, all: 33/40 without Bouncer, 30/40 with; under attack, sending tasks: 8/24 without Bouncer, 0/24 with; under attack, other tasks: 36/140 without Bouncer, 86/139 with; under attack, all: 44/164 without Bouncer, 86/163 with.</desc>
+<style>:root{--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#6b6a66;--grid:#e1e0d9;--axis:#c3c2b7;--band:#f3f2ee;--succeeded:#d03b3b;--received:#eda100;--denied:#2a78d6;--none:#c3c2b7;--without:#6b6a66;}@media (prefers-color-scheme: dark){:root:not(.light){--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#a3a29c;--grid:#2c2c2a;--axis:#4a4a46;--band:#232321;--succeeded:#d03b3b;--received:#c98500;--denied:#3987e5;--none:#4a4a46;--without:#a3a29c;}}:root.dark{--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#a3a29c;--grid:#2c2c2a;--axis:#4a4a46;--band:#232321;--succeeded:#d03b3b;--received:#c98500;--denied:#3987e5;--none:#4a4a46;--without:#a3a29c;}.bg{fill:var(--surface)}.ink{fill:var(--ink)}.ink2{fill:var(--ink2)}.muted{fill:var(--muted)}.grid{stroke:var(--grid)}.axis{stroke:var(--axis)}.band{fill:var(--band)}.ring{stroke:var(--surface)}.ink-stroke{stroke:var(--ink2);fill:none}.without{fill:var(--without)}.without-s{stroke:var(--without)}.bouncer{fill:var(--denied)}.bouncer-s{stroke:var(--denied)}.on-dark{fill:#ffffff}.on-light{fill:#0b0b0b}.on-none{fill:var(--ink)}.marker{fill:var(--ink2)}.s-succeeded{fill:var(--succeeded)}.s-received{fill:var(--received)}.s-denied{fill:var(--denied)}.s-none{fill:var(--none)}.s-missing{fill:none;stroke:var(--muted);stroke-width:1}</style>
+<rect x="0" y="0" width="800" height="433" class="bg" rx="8"/>
+<text x="20" y="32" class="ink" font-size="18" font-weight="600">The cost: task completion with and without Bouncer</text>
+<text x="20" y="54" class="ink2" font-size="13">Share of user tasks AgentDojo scored as done. In this run Bouncer allowed no send or share at all, so the 6 tasks that email</text>
+<text x="20" y="72.2" class="ink2" font-size="13">or share a file fail with it.</text>
+<circle cx="25" cy="92.2" r="5" class="without"/>
+<text x="35" y="96.4" class="ink2" font-size="12">without Bouncer</text>
+<circle cx="148.6" cy="92.2" r="5" class="bouncer"/>
+<text x="158.6" y="96.4" class="ink2" font-size="12">with Bouncer</text>
+<line x1="250.64" y1="92.2" x2="272.64" y2="92.2" class="ink-stroke" stroke-width="1.5"/>
+<text x="278.64" y="96.4" class="ink2" font-size="12">95% interval</text>
+<text x="150" y="126.4" class="muted" font-size="12" text-anchor="middle">0%</text>
+<text x="277.5" y="126.4" class="muted" font-size="12" text-anchor="middle">25%</text>
+<text x="405" y="126.4" class="muted" font-size="12" text-anchor="middle">50%</text>
+<text x="532.5" y="126.4" class="muted" font-size="12" text-anchor="middle">75%</text>
+<text x="660" y="126.4" class="muted" font-size="12" text-anchor="middle">100%</text>
+<text x="780" y="126.4" class="muted" font-size="12" text-anchor="end">without → with</text>
+<line x1="150" y1="136" x2="150" y2="354.4" class="grid" stroke-width="1"/>
+<line x1="277.5" y1="136" x2="277.5" y2="354.4" class="grid" stroke-width="1"/>
+<line x1="405" y1="136" x2="405" y2="354.4" class="grid" stroke-width="1"/>
+<line x1="532.5" y1="136" x2="532.5" y2="354.4" class="grid" stroke-width="1"/>
+<line x1="660" y1="136" x2="660" y2="354.4" class="grid" stroke-width="1"/>
+<text x="20" y="155.2" class="ink" font-size="13" font-weight="600">No attack (40 user tasks)</text>
+<rect x="14" y="162.2" width="772" height="26" class="band" rx="4"/>
+<text x="20" y="179.52" class="ink2" font-size="12">Sending tasks (6)</text>
+<line x1="490" y1="175.2" x2="150" y2="175.2" class="axis" stroke-width="2"/>
+<line x1="263.62" y1="170.2" x2="637.93" y2="170.2" class="without-s" stroke-width="1.5"/>
+<line x1="150" y1="180.2" x2="384.22" y2="180.2" class="bouncer-s" stroke-width="1.5"/>
+<g><title>Sending tasks (6), without Bouncer: 4/6 = 66.7% (95% CI 22.3%–95.7%)</title><circle cx="490" cy="175.2" r="5" class="without ring" stroke-width="2"/></g>
+<g><title>Sending tasks (6), with Bouncer: 0/6 = 0% (95% CI 0%–45.9%)</title><circle cx="150" cy="175.2" r="5" class="bouncer ring" stroke-width="2"/></g>
+<text x="780" y="179.52" class="ink" font-size="12" font-weight="600" text-anchor="end">4/6 → 0/6</text>
+<text x="20" y="207.52" class="ink2" font-size="12">Other tasks (34)</text>
+<line x1="585" y1="203.2" x2="600" y2="203.2" class="axis" stroke-width="2"/>
+<line x1="501.61" y1="198.2" x2="634.74" y2="198.2" class="without-s" stroke-width="1.5"/>
+<line x1="520" y1="208.2" x2="643.17" y2="208.2" class="bouncer-s" stroke-width="1.5"/>
+<g><title>Other tasks (34), without Bouncer: 29/34 = 85.3% (95% CI 68.9%–95%)</title><circle cx="585" cy="203.2" r="5" class="without ring" stroke-width="2"/></g>
+<g><title>Other tasks (34), with Bouncer: 30/34 = 88.2% (95% CI 72.5%–96.7%)</title><circle cx="600" cy="203.2" r="5" class="bouncer ring" stroke-width="2"/></g>
+<text x="780" y="207.52" class="ink" font-size="12" text-anchor="end">29/34 → 30/34</text>
+<text x="20" y="235.52" class="ink2" font-size="12">All tasks</text>
+<line x1="570.75" y1="231.2" x2="532.5" y2="231.2" class="axis" stroke-width="2"/>
+<line x1="492.83" y1="226.2" x2="622.57" y2="226.2" class="without-s" stroke-width="1.5"/>
+<line x1="449.9" y1="236.2" x2="595.27" y2="236.2" class="bouncer-s" stroke-width="1.5"/>
+<g><title>All tasks, without Bouncer: 33/40 = 82.5% (95% CI 67.2%–92.7%)</title><circle cx="570.75" cy="231.2" r="5" class="without ring" stroke-width="2"/></g>
+<g><title>All tasks, with Bouncer: 30/40 = 75% (95% CI 58.8%–87.3%)</title><circle cx="532.5" cy="231.2" r="5" class="bouncer ring" stroke-width="2"/></g>
+<text x="780" y="235.52" class="ink" font-size="12" text-anchor="end">33/40 → 30/40</text>
+<text x="20" y="264.4" class="ink" font-size="13" font-weight="600">Under attack (one case per task × injection)</text>
+<rect x="14" y="271.4" width="772" height="26" class="band" rx="4"/>
+<text x="20" y="288.72" class="ink2" font-size="12">Sending tasks</text>
+<line x1="320" y1="284.4" x2="150" y2="284.4" class="axis" stroke-width="2"/>
+<line x1="229.71" y1="279.4" x2="432.14" y2="279.4" class="without-s" stroke-width="1.5"/>
+<line x1="150" y1="289.4" x2="222.66" y2="289.4" class="bouncer-s" stroke-width="1.5"/>
+<g><title>Sending tasks, without Bouncer: 8/24 = 33.3% (95% CI 15.6%–55.3%)</title><circle cx="320" cy="284.4" r="5" class="without ring" stroke-width="2"/></g>
+<g><title>Sending tasks, with Bouncer: 0/24 = 0% (95% CI 0%–14.2%)</title><circle cx="150" cy="284.4" r="5" class="bouncer ring" stroke-width="2"/></g>
+<text x="780" y="288.72" class="ink" font-size="12" font-weight="600" text-anchor="end">8/24 → 0/24</text>
+<text x="20" y="316.72" class="ink2" font-size="12">Other tasks</text>
+<line x1="281.14" y1="312.4" x2="465.54" y2="312.4" class="axis" stroke-width="2"/>
+<line x1="245.4" y1="307.4" x2="322.28" y2="307.4" class="without-s" stroke-width="1.5"/>
+<line x1="421.59" y1="317.4" x2="506.85" y2="317.4" class="bouncer-s" stroke-width="1.5"/>
+<g><title>Other tasks, without Bouncer: 36/140 = 25.7% (95% CI 18.7%–33.8%)</title><circle cx="281.14" cy="312.4" r="5" class="without ring" stroke-width="2"/></g>
+<g><title>Other tasks, with Bouncer: 86/139 = 61.9% (95% CI 53.3%–70%)</title><circle cx="465.54" cy="312.4" r="5" class="bouncer ring" stroke-width="2"/></g>
+<text x="780" y="316.72" class="ink" font-size="12" text-anchor="end">36/140 → 86/139</text>
+<text x="20" y="344.72" class="ink2" font-size="12">All cases</text>
+<line x1="286.83" y1="340.4" x2="419.08" y2="340.4" class="axis" stroke-width="2"/>
+<line x1="253.12" y1="335.4" x2="324.91" y2="335.4" class="without-s" stroke-width="1.5"/>
+<line x1="378.48" y1="345.4" x2="459.15" y2="345.4" class="bouncer-s" stroke-width="1.5"/>
+<g><title>All cases, without Bouncer: 44/164 = 26.8% (95% CI 20.2%–34.3%)</title><circle cx="286.83" cy="340.4" r="5" class="without ring" stroke-width="2"/></g>
+<g><title>All cases, with Bouncer: 86/163 = 52.8% (95% CI 44.8%–60.6%)</title><circle cx="419.08" cy="340.4" r="5" class="bouncer ring" stroke-width="2"/></g>
+<text x="780" y="344.72" class="ink" font-size="12" text-anchor="end">44/164 → 86/163</text>
+<text x="20" y="376.4" class="muted" font-size="12">Under attack, overall completion is higher with Bouncer (44/164 → 86/163) because AgentDojo fails any task where an unwanted email</text>
+<text x="20" y="393.8" class="muted" font-size="12">actually went out. Only 6 sending tasks, so their intervals are wide (0/6 has a 95% upper bound of 45.9%). Asks were treated as</text>
+<text x="20" y="411.2" class="muted" font-size="12">denies (no human in the loop).</text>
+</svg>

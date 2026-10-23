@@ -1,6 +1,16 @@
 # AgentDojo benchmark results — Bouncer contract engine
 
-**Status: MEASURED — live runs 2026-07-11 (n=3) and 2026-09-18 (n=3, n=15).**
+> **Latest run, 2026-10-23:** `openai/gpt-4o-mini`, AgentDojo workspace v1.2.2,
+> 40 user tasks. Without Bouncer the attacker's goal was reached in 48 of 164
+> in-scope cases and with Bouncer in 0 of 163 (a send to the attacker ran in 106
+> and 0). Bouncer allowed no send at all in this run, so the 0 follows by
+> construction here; see the README for what the run does and does not show. No-attack task completion was 33/40 without and 30/40 with Bouncer,
+> with all of the loss on the six sending tasks (4/6 to 0/6). Full report:
+> [`RESULTS-final.md`](RESULTS-final.md); raw rows: `results/final.jsonl`. The
+> history below is kept as it was. Its harness differs (a shared Bouncer engine
+> across cases in a pass), so its numbers are not directly comparable.
+
+**Status: MEASURED — live runs 2026-07-11 (n=3), 2026-09-18 (n=3, n=15) and 2026-10-23 (n=165, see above).**
 
 > **2026-09-18: the larger run does not support the July utility result.** On
 > 15 cases, Bouncer blocked the one attack that landed, but task completion

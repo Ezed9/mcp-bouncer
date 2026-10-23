@@ -7,7 +7,7 @@ contracts on each call.
 
 ```bash
 uv tool install bouncer-mcp
-bouncer init
+bouncer init --config path/to/mcp-config.json
 ```
 
 The enforcement engine — provenance and taint rules, per-argument constraints,
