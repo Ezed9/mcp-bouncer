@@ -1,6 +1,6 @@
 # Security Policy
 
-Bouncer is a safety layer, so a vulnerability here is a way to defeat the
+Bouncer is an enforcement layer, so a vulnerability here is a way to defeat the
 enforcement — most importantly, **any way to make an `exfiltrating` tool call
 resolve to a silent `allow`** when it should have been `deny` or `ask`. Other
 examples: bypassing the sink gate with an encoded/typed destination, escaping a

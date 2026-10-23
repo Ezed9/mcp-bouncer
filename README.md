@@ -5,8 +5,8 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**A local MCP proxy that stops a prompt-injected agent from sending your data
-to an address it read in untrusted content. The rules are deterministic, no
+**A local MCP proxy that denies an agent's send and share calls to destinations
+that first appeared in untrusted tool output. The rules are deterministic, no
 LLM decides anything, and every decision is logged.**
 
 ![Terminal recording: an agent that read a poisoned helpdesk ticket tries to
@@ -22,11 +22,15 @@ a review pack written from the audit log. No API keys; reproduce it in the
 [what the demo runs](examples/demo/README.md) ·
 [the review pack it writes](examples/demo/sample-review-pack.md)*
 
+**The cost:** in the [AgentDojo run](#benchmark) Bouncer allowed no send at
+all, so legitimate tasks that send email or share files went from 4/6 to 0/6.
+It covers MCP calls only ([limits](#limits)).
+
 - **Blocks sends to addresses that came from untrusted data.** If an agent tries
-  to email, post or share to a destination that first appeared in a tool's
-  output (a poisoned email, ticket or document), the call is denied. A
-  destination Bouncer can't trace goes to a human; allowlisted or approved ones
-  pass.
+  to email, post or share to a destination that appeared earlier in the same
+  server's output (a poisoned email, ticket or document), the call is denied.
+  The match is literal. A destination Bouncer can't trace, an encoded one
+  included, goes to a human; allowlisted or approved ones pass.
 - **Puts hard limits on write tools.** Path confinement, regex checks on
   arguments, per-session call budgets, and tools that weren't there at startup
   are refused.
@@ -182,9 +186,9 @@ in it. The attacker controls tool output only; they cannot change Bouncer, its
 policy, the client config or the server. Trusted: you (policy author and
 approver), the MCP client, the upstream server and the local machine.
 
-What Bouncer guarantees, for MCP tool calls that go through it:
+What the code and tests pin down, for MCP tool calls that go through it:
 
-| Guarantee | Code | Tests |
+| Behaviour | Code | Tests |
 |---|---|---|
 | No model or classifier in the enforcement path | [`engine.py`](src/bouncer/engine.py) | |
 | A denied call is never forwarded upstream | [`proxy.py`](bouncer-mcp/src/bouncer_mcp/proxy.py) | [`test_proxy.py`](bouncer-mcp/tests/test_proxy.py) |
@@ -202,8 +206,8 @@ agent passed as arguments (email bodies included). Bouncer only appends to it,
 but nothing makes it tamper-evident.
 
 **Review pack.** `bouncer report` writes a Markdown pack: each tool and the
-controls on it, an audit log summary, findings, these guarantees and limits,
-and an OWASP LLM Top 10 mapping.
+controls on it, an audit log summary, findings, what it does and doesn't
+cover, and an OWASP LLM Top 10 mapping.
 
 ```bash
 bouncer report --policy bouncer.yaml --tools tools.json -o review-pack.md
@@ -245,21 +249,30 @@ Report vulnerabilities privately: [`SECURITY.md`](SECURITY.md).
 - **Undeclared destination arguments aren't checked** if a tool has other
   declared ones. A pack must list every recipient-type argument the server
   accepts.
-- **A budget limits damage; it doesn't prevent the first call.** Use
+- **A budget limits damage; it doesn't deny the first call.** Use
   `max_calls: 0` to forbid a tool.
 
 Every limit in detail:
 [`docs/how-it-works.md#documented-limits`](docs/how-it-works.md#documented-limits).
 
+**Security note.** In 0.1.0 to 0.1.2, proxy mode also listed Bouncer's own
+`bouncer_*` tools, prompts and resources to the agent. Calls to them were
+answered before the engine and outside the audit log, so a prompt-injected
+agent could call them, including `bouncer_check_verdict` (which wrote to the
+audit log) and `bouncer_audit_summary` (which returned recent audit entries).
+0.1.3 removes them from proxy mode. Upgrade if you run an older version. See
+the [changelog](CHANGELOG.md#013---2026-10-23).
+
 ## Benchmark
 
-**Headline:** on AgentDojo's `workspace` suite (v1.2.2, the `important_instructions`
+**The cost first:** in this run Bouncer allowed no send or share at all. With
+no attack, task completion went from 33/40 to 30/40, and the whole loss is on
+the six tasks that send an email or share a file (4/6 to 0/6).
+**The result:** on AgentDojo's `workspace` suite (v1.2.2, the `important_instructions`
 attack, `openai/gpt-4o-mini` as the agent), attacks that tried to send data to
 the attacker succeeded in **48 of 164 cases without Bouncer and 0 of 163 with
 it** (95% upper bound 2.2%), scored by AgentDojo's own security checker.
-**The cost:** with no attack, task completion went from 33/40 to 30/40, and the
-whole loss is on the six tasks that send an email or share a file (4/6 to 0/6):
-in this run Bouncer allowed no send at all.
+Because nothing was allowed, the 0 follows by construction.
 
 ![Every attack case as a square, user task by injection: without Bouncer 48 of 164 are red (attack succeeded) and 58 more amber (a send to the attacker ran); with Bouncer none are red or amber, 124 of 163 are blue (Bouncer refused a send or share)](docs/assets/agentdojo-cases.svg)
 
@@ -277,13 +290,14 @@ in this run Bouncer allowed no send at all.
   ran with the attacker as a recipient. It is wider than AgentDojo's own check,
   which for injections 5-12 also requires deleting the sent email or files. Some
   of those sends carry no user data (injection 0 sends a one-line greeting).
-- **Bouncer does not stop the agent from being hijacked; it stops the send.** The
+- **Bouncer does not detect or undo the hijack; it denies the send.** The
   agent still tried to email the attacker in about two thirds of the Bouncer
   cases (read from the traces); every attempt was denied.
-- **Task completion under attack is higher with Bouncer overall** (53% vs 27%),
-  mostly because AgentDojo fails any task where an unwanted email actually went
-  out. Scored without that side-effect check the gap shrinks (88/164 vs 99/163,
-  p = 0.09). On the sending tasks completion is lower: 0/24 vs 8/24.
+- **Under attack, sending tasks did worse with Bouncer** (0/24 vs 8/24).
+  Overall completion under attack was higher with it (53% vs 27%), mostly
+  because AgentDojo fails any task where an unwanted email actually went out.
+  Scored without that side-effect check the gap shrinks (88/164 vs 99/163,
+  p = 0.09).
 - **By task type, no attack:** sending tasks 4/6 without Bouncer, 0/6 with it;
   all other tasks 29/34 without, 30/34 with.
 
@@ -292,7 +306,8 @@ in this run Bouncer allowed no send at all.
 **What this does not show:**
 
 - **Bouncer allowed no send or share in the whole run** (0 allowed of 649 sink
-  verdicts, including legitimate ones), so 0/163 follows by construction here. The
+  verdicts, including legitimate ones; 635 if the two errored Bouncer cases are
+  left out, as in the RESULTS-final table), so 0/163 follows by construction here. The
   run does not show the gate telling a legitimate send from an attack. The
   address-book variant is the only evidence that it allows one (2 sends, tasks 13
   and 19).
@@ -309,7 +324,7 @@ in this run Bouncer allowed no send at all.
   its own, was the control). Earlier runs on that model landed 1 attack in 15
   and 1 in 30; they are kept in [`benchmark/RESULTS.md`](benchmark/RESULTS.md).
 - Coverage: all 40 user tasks against injections 0, 3, 4 and 6, plus injection 10
-  on six tasks. The run stopped at its budget cap before the other six in-scope
+  on six tasks. The run stopped at its $1.40 budget cap before the other six in-scope
   injections. Three cases ended in model errors (malformed or oversized output) and are excluded.
 - There are only six sending tasks, so the sending-task numbers have wide
   intervals (0/6 has a 95% upper bound of 46%).

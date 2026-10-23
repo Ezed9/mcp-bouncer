@@ -6,9 +6,9 @@ documented limits. The [README](../README.md) is the short version.
 
 ## How it decides
 
-Every tool call runs the same deterministic gauntlet — no model, no scoring.
-The sink gate is the novel part: it is **deny-unless-trusted on the
-_destination_**, keyed to where the value came from.
+Every tool call goes through the same deterministic checks. No model, no
+scoring. The sink gate is **deny-unless-trusted on the _destination_**, keyed
+to where the value came from.
 
 ```mermaid
 flowchart TD
@@ -57,16 +57,16 @@ Four deterministic contract types, checked in this order (`ContractEngine._decid
 2. **Call budgets.** `max_calls` per tool per session. **Budgets count
    attempts, not successes** — the counter increments on every call that
    reaches the budget check, including one later denied by a different
-   contract. This is a deliberate fail-safe choice: an attempted destructive
+   contract. This is a deliberate fail-closed choice: an attempted destructive
    call is a real attempt, and it keeps a denied call from being retried for
    free. See the live-verified walkthrough in
    [`docs/manual-smoke.md`](manual-smoke.md) for exactly how this plays
    out (a constraint-denied write still consumes a budget slot).
-3. **Per-argument constraints.** Path-prefix confinement (normalized,
-   traversal-safe — `.`/`..` are collapsed before comparison, so
-   `../../etc/passwd` can't escape an allowed prefix) and regex
-   matching on named arguments.
-4. **Sink gate — deny-unless-trusted (the headline contract).** For tools
+3. **Per-argument constraints.** Path-prefix confinement (normalized:
+   `.`/`..` are collapsed before comparison, so `../../etc/passwd` can't
+   escape an allowed prefix; symlinks are not resolved) and regex matching on
+   named arguments.
+4. **Sink gate: deny-unless-trusted.** For tools
    marked `exfiltrating`, every declared `sink_params` argument (recipient,
    channel, url, share-target, …) must resolve to a **provenance-trusted**
    destination: a pack/YAML allowlist entry, or a remembered human approval.
@@ -83,8 +83,8 @@ Four deterministic contract types, checked in this order (`ContractEngine._decid
    - This is a value-level taint check (`src/bouncer/taint.py`):
      normalize case/whitespace, then substring-match against everything the
      session has seen returned from an upstream tool. It decides `deny` vs.
-     `ask`, never `deny` vs. silent `allow` — a missed match degrades to a
-     human check, not a leak.
+     `ask`, never `deny` vs. silent `allow`. A missed match goes to a human
+     instead of being allowed.
 
 ## Layered policy
 
@@ -114,7 +114,10 @@ file.
 
 ## MCP Tools (Skills)
 
-Bouncer exposes native MCP tools that allow AI agents and developers to inspect security postures, evaluate hypothetical tool calls, and validate policy contracts:
+The standalone server (`bouncer serve`) exposes these tools, and the prompts
+and resources below, for checking policies and hypothetical calls. Proxy mode
+(`bouncer run`) does not list them to the agent since 0.1.3; in 0.1.0 to
+0.1.2 it did (see the [changelog](../CHANGELOG.md#013---2026-10-23)).
 
 | Tool | Description | Key Arguments |
 | :--- | :--- | :--- |
@@ -127,8 +130,8 @@ Bouncer exposes native MCP tools that allow AI agents and developers to inspect 
 
 Interactive prompt templates for security review and policy authoring:
 
-- **`review_mcp_security`**: Guided evaluation of an MCP server's exposed tools to uncover dangerous data exfiltration sinks, unsanitized parameters, and excessive privileges.
-- **`generate_bouncer_policy`**: Interactive assistant that generates a hardened, declarative `policy.yaml` tailored to your MCP servers and desired risk tolerance (`standard`, `strict`, `paranoid`).
+- **`review_mcp_security`**: A guided review of an MCP server's tools for send/share sinks, unchecked parameters and excess privileges.
+- **`generate_bouncer_policy`**: Drafts a `policy.yaml` for your MCP servers at a chosen risk level (`standard`, `strict`, `paranoid`).
 
 ## MCP Resources
 
@@ -291,9 +294,9 @@ d2 send to tainted attacker@evil.com:  DENY  [sink_gate] destination to='attacke
 d3 send to unproven new@random.com:    ASK   [sink_gate] destination to='new@random.com' is not a vouched recipient
 ```
 
-Want a recorded GIF/asciinema of this against Claude Code or Cursor? None
-exists yet — record your own with the commands above rather than trust a
-canned capture.
+There is no recording of this run against Claude Code or Cursor. The README's
+recording is the scripted helpdesk demo in
+[`examples/demo/`](../examples/demo/README.md).
 
 ## Documented limits
 
@@ -312,8 +315,8 @@ canned capture.
   *behavior* — pair it with [`mcp-scan`](https://github.com/invariantlabs-ai/mcp-scan)
   or similar for that.
 - **Doesn't make the agent's plan smart.** Contracts bound what the agent may
-  do, not whether its plan is a good idea. A denied call is safe, not
-  necessarily corrected.
+  do, not whether its plan is a good idea. A denied call is not forwarded, but
+  nothing corrects the plan.
 - **Taint is per wrapped server.** Each `bouncer run` wraps one server with its
   own taint tracker, so a *cross-server* flow — read a poisoned file via one
   server, then send via another — surfaces as `ask` (unproven destination), not

@@ -23,7 +23,7 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 
 ### Security
 - Proxy mode no longer lists Bouncer's own `bouncer_*` tools, prompts or resources
-  to the agent. In 0.1.x they were answered before the engine, outside the audit
+  to the agent. In 0.1.0 to 0.1.2 they were answered before the engine, outside the audit
   log, so a prompt-injected agent could call them (including
   `bouncer_check_verdict`, which wrote to the audit log, and
   `bouncer_audit_summary`). `bouncer serve`, the standalone server, is unchanged.

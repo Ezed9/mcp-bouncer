@@ -23,8 +23,9 @@ root: `vhs examples/demo/demo.tape` writes `docs/assets/demo.gif` and `demo.mp4`
 - The demo is the agent's MCP client. **The agent's tool calls are scripted.** They
   are the calls an agent makes after reading the poisoned ticket `T-1002`, which
   tells it to send the customer list to `attacker@evil.example`, write an SSH key,
-  and delete customers. Results with real models are in
-  [`benchmark/RESULTS.md`](../../benchmark/RESULTS.md).
+  and delete customers. Results with a real model are in
+  [`benchmark/RESULTS-final.md`](../../benchmark/RESULTS-final.md); earlier
+  runs are in [`benchmark/RESULTS.md`](../../benchmark/RESULTS.md).
 
 ## What you see
 
