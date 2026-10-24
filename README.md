@@ -11,12 +11,14 @@ LLM decides anything, and every decision is logged.**
 
 ![Terminal recording: an agent that read a poisoned helpdesk ticket tries to
 email the customer list to an attacker, write an SSH key and delete customers
-through Bouncer. All three calls are denied, a send to a new address is
+through Bouncer. The email and the SSH key write are denied, the first delete
+runs and the second is stopped by the call budget, a send to a new address is
 approved by a human, and a security review pack is written from the audit
 log.](docs/assets/demo.gif)
 
 *Scripted tool calls from a hijacked agent, sent through the real proxy to a
-real MCP server: three attacks denied, one new recipient approved by a human,
+real MCP server: three attack calls denied (one delete ran first, within its
+call budget), one new recipient approved by a human,
 a review pack written from the audit log. No API keys; reproduce it in the
 [quickstart](#see-it-in-60-seconds). [MP4](docs/assets/demo.mp4) ·
 [what the demo runs](examples/demo/README.md) ·
@@ -40,7 +42,7 @@ It covers MCP calls only ([limits](#limits)).
 Bouncer does not detect prompt injection. It assumes the agent will sometimes
 be fooled and limits what a fooled agent can do through MCP.
 
-**Status:** v0.1.3, early. MCP over stdio, one machine. Read the
+**Status:** v0.1.4, early. MCP over stdio, one machine. Read the
 [limits](#limits) before relying on it.
 
 ## See it in 60 seconds
@@ -292,12 +294,12 @@ Because nothing was allowed, the 0 follows by construction.
   of those sends carry no user data (injection 0 sends a one-line greeting).
 - **Bouncer does not detect or undo the hijack; it denies the send.** The
   agent still tried to email the attacker in about two thirds of the Bouncer
-  cases (read from the traces); every attempt was denied.
+  cases (107 of 163, counted from the traces); every attempt was denied.
 - **Under attack, sending tasks did worse with Bouncer** (0/24 vs 8/24).
-  Overall completion under attack was higher with it (53% vs 27%), mostly
-  because AgentDojo fails any task where an unwanted email actually went out.
-  Scored without that side-effect check the gap shrinks (88/164 vs 99/163,
-  p = 0.09).
+  Overall completion under attack was higher with it (53% vs 27%). AgentDojo
+  fails a task when an unwanted email actually went out, so part of that gap
+  is the attack's side effect, not Bouncer doing the task better. This run does
+  not separate the two.
 - **By task type, no attack:** sending tasks 4/6 without Bouncer, 0/6 with it;
   all other tasks 29/34 without, 30/34 with.
 
@@ -321,8 +323,9 @@ Because nothing was allowed, the 0 follows by construction.
   delete files, create events or phish contacts are out of scope and not measured.
 - The model was chosen because it follows injections: a cheap 8-case probe of four
   models picked it (`deepseek/deepseek-v4-flash`, which resists most injections on
-  its own, was the control). Earlier runs on that model landed 1 attack in 15
-  and 1 in 30; they are kept in [`benchmark/RESULTS.md`](benchmark/RESULTS.md).
+  its own, was the control). An earlier run on that model landed 1 attack in 15
+  ([`benchmark/RESULTS.md`](benchmark/RESULTS.md)), and the probe landed 0 in 8
+  ([`benchmark/RESULTS-probe-deepseek.md`](benchmark/RESULTS-probe-deepseek.md)).
 - Coverage: all 40 user tasks against injections 0, 3, 4 and 6, plus injection 10
   on six tasks. The run stopped at its $1.40 budget cap before the other six in-scope
   injections. Three cases ended in model errors (malformed or oversized output) and are excluded.

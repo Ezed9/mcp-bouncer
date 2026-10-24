@@ -4,7 +4,7 @@ Generated 2026-10-22 by Bouncer 0.1.2 (https://github.com/Ezed9/mcp-bouncer).
 
 ## 1. Summary
 
-Tool calls from the AI agent to `helpdesk (demo)` pass through Bouncer, a local proxy that checks each call against deterministic rules before it reaches the server. Calls that break a rule are blocked and never reach the server; calls to a new destination need a human's approval; every decision is logged. This report lists the rules in force, what the log recorded, and what Bouncer does and does not guarantee.
+Tool calls from the AI agent to `helpdesk (demo)` pass through Bouncer, a local proxy that checks each call against deterministic rules before it reaches the server. Calls that break a rule are blocked and never reach the server; calls to a new destination need a human's approval; every decision is logged. This report lists the rules in force, what the log recorded, and what Bouncer enforces and what it does not.
 
 ## 2. Tool inventory and controls
 
@@ -56,11 +56,11 @@ Dated entries span 2026-10-21T21:03:09+00:00 to 2026-10-21T21:03:24+00:00.
 
 Argument values are deliberately left out of this report.
 
-## 5. What Bouncer guarantees and does not guarantee
+## 5. What Bouncer enforces and what it does not
 
 **Enforced by code (deterministic, no LLM in the decision path):**
 
-- Every MCP tool call on a wrapped server is evaluated in a fixed order: schema
+- Every MCP tool call on a wrapped server is evaluated in a fixed order: tool-name
   pinning, call budget, argument constraints, sink gate
   (`src/bouncer/engine.py`, `ContractEngine._decide`).
 - A tool that was not in the server's tool list at startup is not forwarded
@@ -80,7 +80,7 @@ Argument values are deliberately left out of this report.
   ignored.
 - Every verdict is appended to a JSONL audit log.
 
-**Not guaranteed:**
+**Not enforced:**
 
 - Only MCP tool calls are governed. An agent with shell or HTTP access outside
   MCP can bypass Bouncer.
@@ -89,8 +89,8 @@ Argument values are deliberately left out of this report.
 - Path checks are lexical; symlinks are not resolved.
 - Taint is tracked per wrapped server. Data read through one server and sent
   through another is asked, not denied.
-- Schemas are pinned at startup only; a changed schema for an existing tool
-  name is not detected mid-session.
+- Only tool names are pinned at startup; a changed schema for an existing
+  tool name is not detected.
 - A destination argument that is not declared in `sink_params` (while another
   one is) is treated as content and not gated.
 - It does not vet the upstream server's own behaviour, and it does not detect
@@ -108,7 +108,7 @@ Argument values are deliberately left out of this report.
 | LLM03 Supply Chain | No | Does not vet MCP servers or models. |
 | LLM04 Data and Model Poisoning | No | |
 | LLM05 Improper Output Handling | Partial | Only where `arg_patterns` are configured: model-produced tool arguments must match a regex before the call runs. |
-| LLM06 Excessive Agency | Yes | Path confinement, argument regexes, per-session call budgets, schema pinning, human approval for new destinations. |
+| LLM06 Excessive Agency | Yes | Path confinement, argument regexes, per-session call budgets, tool-name pinning, human approval for new destinations. |
 | LLM07 System Prompt Leakage | No | |
 | LLM08 Vector and Embedding Weaknesses | No | |
 | LLM09 Misinformation | No | |

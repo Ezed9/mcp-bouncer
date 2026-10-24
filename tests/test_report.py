@@ -135,13 +135,13 @@ def test_benchmark_section_uses_numbers_from_json() -> None:
     assert "| Attack success rate (lower is better) | 0.25 (1/4) | 0.00 (0/4) |" in report
     assert "| Task completion, no attack | not run | 0.50 (1/2) |" in report
     assert "under attack 0 allow, 0 ask, 3 deny" in report
-    assert "## 6. What Bouncer guarantees" in report
+    assert "## 6. What Bouncer enforces" in report
 
 
 def test_benchmark_section_absent_when_not_given() -> None:
     report = _report()
     assert "Benchmark evidence" not in report
-    assert "## 5. What Bouncer guarantees" in report
+    assert "## 5. What Bouncer enforces" in report
 
 
 def test_load_tools_accepts_tools_list_result_and_bare_list(tmp_path: Path) -> None:

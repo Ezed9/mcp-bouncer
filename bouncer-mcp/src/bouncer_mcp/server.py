@@ -99,7 +99,7 @@ def get_builtin_tools() -> list[mcp_types.Tool]:
             name="bouncer_get_active_policies",
             description=(
                 "Inspect all active contract packs (builtin rules for filesystem, "
-                "email, http, bash, etc.) and user overrides loaded by Bouncer."
+                "gmail, slack, github, gdrive) and user overrides loaded by Bouncer."
             ),
             inputSchema={
                 "type": "object",

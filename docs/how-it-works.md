@@ -48,7 +48,7 @@ enforced by `bouncer-mcp/tests/test_proxy.py`).
 Four deterministic contract types, checked in this order (`ContractEngine._decide`,
 `src/bouncer/engine.py`):
 
-1. **Schema pinning (rug-pull guard).** Every upstream tool is recorded at
+1. **Tool pinning (names only).** Every upstream tool is recorded at
    startup. A tool call for a name that was **not pinned at startup** (e.g. a
    tool the server added mid-session) is unknown — `ask`, which fails closed to
    `deny` since a pinning `ask` has no destination a human can vouch for.
@@ -158,7 +158,7 @@ uv sync --all-packages
 
 ### 1. Standalone MCP Server Mode
 
-You can run Bouncer directly as an MCP server in Claude Desktop, Cursor, or LobeHub to access its policy validation and security auditing tools:
+You can run Bouncer directly as an MCP server in Claude Desktop or Cursor to access its policy validation and security auditing tools:
 
 ```json
 {
@@ -327,10 +327,9 @@ recording is the scripted helpdesk demo in
   resolve symlinks, so a symlink placed inside an allowed prefix could point
   outside it. Don't rely on path confinement alone against an adversary who can
   create symlinks in the allowed directory.
-- **No mid-session schema-change detection (v1).** Schemas are pinned once at
-  startup; a server that changes an *already-pinned* tool's schema mid-session
-  is not re-checked. Only names absent from the startup snapshot are treated as
-  unknown.
+- **No schema-change detection (v1).** Only tool names are pinned at startup;
+  a server that changes an *already-pinned* tool's schema is not detected. Only
+  names absent from the startup snapshot are treated as unknown.
 - **Sink params must be complete for your server.** The gate inspects the
   `sink_params` you declare (plus a fail-closed sweep of *all* args when a
   tool's declared sinks are entirely absent from a call — the schema-mismatch

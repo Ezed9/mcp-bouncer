@@ -23,7 +23,9 @@ verdict you expected. A failing test in the style of
 ## Scope
 
 In scope: the enforcement logic in `src/bouncer/` — the engine, sink gate,
-taint tracker, policy loader, path confinement, budgets, and schema pinning.
+taint tracker, policy loader, path confinement, budgets, and tool-name pinning —
+and the proxy in `bouncer-mcp/src/bouncer_mcp/`, including what it exposes to
+the agent (the 0.1.0–0.1.2 `bouncer_*` tools were a bug of this kind).
 
 Out of scope (documented limitations, not vulnerabilities — see the README):
 
@@ -34,6 +36,8 @@ Out of scope (documented limitations, not vulnerabilities — see the README):
 - Cross-server taint (each `bouncer run` wraps one server) surfacing as `ask`
   rather than `deny`.
 - Symlink escapes from lexical path confinement.
+- A changed schema for a tool name that existed at startup (only names are
+  pinned).
 
 If you're unsure whether something is in scope, report it privately and we'll
 figure it out together.

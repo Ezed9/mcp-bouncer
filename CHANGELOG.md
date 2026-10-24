@@ -6,6 +6,29 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-24
+
+### Changed
+- The review pack heading "What Bouncer guarantees and does not guarantee" is now
+  "What Bouncer enforces and what it does not", and "Not guaranteed" is "Not
+  enforced". The review pack, `docs/how-it-works.md` and `SECURITY.md` now say
+  that only tool names are pinned at startup, not schemas; a changed schema for
+  an existing tool was never detected.
+- The standalone server's `bouncer_get_active_policies` description lists the
+  packs that exist (filesystem, gmail, slack, github, gdrive).
+
+### Documentation
+- README: the share of Bouncer cases where the agent tried to email the attacker
+  is now counted (107 of 163). The unverified "88/164 vs 99/163, p = 0.09"
+  figure is removed.
+- README: the demo caption now says what the demo shows (email and SSH write
+  denied, first delete runs, second stopped by the budget). The deepseek control
+  line now reads 1 attack in 15, and 0 in 8 in the probe, each linked to its
+  results file.
+- `SECURITY.md` scope now includes the `bouncer-mcp` proxy.
+- `docs/how-it-works.md` no longer lists LobeHub as a supported client; it was
+  never tested.
+
 ## [0.1.3] - 2026-10-23
 
 ### Added
