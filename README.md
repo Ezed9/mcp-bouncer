@@ -242,9 +242,8 @@ Report vulnerabilities privately: [`SECURITY.md`](SECURITY.md).
   `dana@x.com` doesn't count, so an attacker address glued to other text gets
   `ask`, not `deny`. Before matching, case, whitespace, full-width forms and
   zero-width characters are folded, and percent-encoding and HTML entities in
-  output are decoded. An address inside a longer recipient string
-  (`a@x.com, b@y.com`, `mailto:`, a URL query), or sent with a trailing dot or
-  a `+tag`, is checked too. Base64, quoted-printable, homoglyphs (Cyrillic `а`
+  output are decoded. An address inside a URL query, or sent with a trailing
+  dot or a `+tag`, is checked too. Base64, quoted-printable, homoglyphs (Cyrillic `а`
   for `a`), punycode, `-` subaddressing and assembled addresses ("attacker at
   evil dot com") get `ask`, not `deny`. Destinations shorter than six
   characters are never marked tainted. A trusted-looking destination that also
@@ -254,10 +253,9 @@ Report vulnerabilities privately: [`SECURITY.md`](SECURITY.md).
   Approving `https://hooks.example/AbC` also approves `https://hooks.example/abc`.
   Other characters compare exactly, so `JOSÉ@x.es` and `josé@x.es` are two
   destinations.
-- **A recipient string or structure is vouched for as a whole.**
-  `"alice@corp.com, bob@corp.com"` asks even when both are allowlisted, and
-  `{"email": "alice@corp.com", "name": "Alice"}` asks because the name is
-  checked as a destination too.
+- **A structured recipient's name is checked too.**
+  `{"email": "alice@corp.com", "name": "Alice"}` asks even when the address is
+  allowlisted, because `Alice` is gated as a destination.
 - **Lexical path checks.** `..` is collapsed but symlinks are not resolved.
 - **Pinned names only.** A changed schema for a tool that existed at startup
   is not detected.
@@ -389,7 +387,7 @@ ambiguous case resolves to `ask` or `deny`, never a silent `allow`.
 
 ```bash
 uv sync --all-packages
-uv run pytest -q        # 160 tests (3 need the benchmark extra)
+uv run pytest -q        # 219 tests (3 need the benchmark extra)
 uv run ruff check .
 ```
 

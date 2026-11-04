@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+from email.utils import getaddresses
 from pathlib import PurePosixPath
 
 from .approvals import ApprovalStore, approval_key
@@ -28,17 +29,9 @@ def _normeq(s: str) -> str:
     return os.path.normpath(str(s))
 
 
-# "Dana <dana@x.com>" or '"Dana" <dana@x.com>': the address inside the brackets.
-# A quoted name may hold anything ("@", ","); an unquoted one may not hold "@",
-# "," or ";", since to an address parser those start another recipient
-# ("attacker, Alice <alice@x.com>" is two). The address's local part excludes
-# "@" so the match cannot backtrack quadratically on "<a@a@a@...".
-_DISPLAY_NAME = re.compile(
-    r'^(?:"(?:[^"\\]|\\.)*"|[^<>@",;])*<\s*([^<>\s@,;]+@[^<>\s,;]+)\s*>\s*$'
-)
-# Characters that separate addresses inside a longer destination string:
-# lists ("a@x, b@y"), brackets, quotes, "mailto:" and URL query syntax.
-_ADDRESS_SEPARATORS = re.compile(r"[\s<>()\[\],;:\"'`?&=/]+")
+# The lookbehind starts a match only at the start of a run of address
+# characters: the same matches, but linear instead of quadratic on long runs.
+_ADDRESS_TOKEN = re.compile(r"(?<![\w.%+\-])[\w.%+\-]+@[\w\-]+(?:\.[\w\-]+)*")
 # Keys of a structured recipient ({"email": ..., "name": ...}) that name a
 # field rather than being a destination. Any other dict key is gated as a
 # destination, since a recipient map can be keyed by address.
@@ -48,37 +41,45 @@ _FIELD_NAMES = frozenset({
 })
 
 
-def _bare_address(value: str) -> str:
-    # Gate on the address, not the display name, so the allowlist, approvals
-    # and taint all see "Dana <dana@x.com>" and "dana@x.com" as one recipient.
-    m = _DISPLAY_NAME.match(value)
-    return m.group(1) if m else value
+def _addresses(value: str) -> list[str]:
+    # Gate on addresses, not display names or list syntax, so the allowlist,
+    # approvals and taint see "Dana <dana@x.com>" and "dana@x.com" as one
+    # recipient, and "a@x.com, b@y.com" as two. URLs are left whole: the
+    # header parser would mangle them. Unparseable input stays as it is.
+    if "@" not in value or "://" in value:
+        return [value]
+    parsed = getaddresses([value.replace(";", ",").strip().strip(",")], strict=True)
+    found = [addr for _, addr in parsed if addr] or [value]
+    # The parser drops comments and display names, but the downstream tool may
+    # not, so every address-shaped token in the raw value is gated too.
+    seen = {normalize(a) for a in found}
+    return found + [t for t in _ADDRESS_TOKEN.findall(value) if normalize(t) not in seen]
 
 
-def _embedded_addresses(value: str) -> list[str]:
-    # Address-shaped pieces of a longer destination, plus the forms that reach
-    # the same mailbox: without trailing dots (an absolute domain) and without
-    # a "+tag". Used only to find taint (DENY), never to grant trust.
+def _taint_variants(value: str) -> list[str]:
+    # Extra forms checked for taint only (DENY), never for trust: an address
+    # inside a URL (which `_addresses` leaves whole), and an address without
+    # its "+tag", which reaches the same mailbox on most providers.
     out: list[str] = []
-    for piece in _ADDRESS_SEPARATORS.split(value):
-        if "@" not in piece:
-            continue
-        piece = piece.rstrip(".")
-        out.append(piece)
-        local, _, domain = piece.partition("@")
-        if "+" in local:
+    tokens = _ADDRESS_TOKEN.findall(value) if "://" in value else [value]
+    for token in tokens:
+        if token != value:
+            out.append(token)
+        local, at, domain = token.partition("@")
+        if at and "+" in local:
             out.append(local.split("+", 1)[0] + "@" + domain)
     return out
 
 
 def _scalar_dests(value: object) -> list[str]:
-    # Flatten a sink arg into its scalar destination strings. A list/tuple/set
+    # Flatten a sink arg into its destination strings. A list/tuple/set
     # (multi-recipient shapes) is all destinations; a dict (a structured
     # recipient like {"email": ...}, or a map keyed by address) contributes its
     # values and every key that is not a known field name; nested containers
-    # flatten recursively. Flattening — rather than str()-ing the container —
-    # keeps each address exposed to taint so a tainted address nested in a
-    # structure still DENYs instead of downgrading to ASK.
+    # flatten recursively; a string is split into its addresses. Flattening —
+    # rather than str()-ing the container — keeps each address exposed to taint
+    # so a tainted address nested in a structure still DENYs instead of
+    # downgrading to ASK.
     if isinstance(value, (list, tuple, set, frozenset)):
         out: list[str] = []
         for item in value:
@@ -88,10 +89,10 @@ def _scalar_dests(value: object) -> list[str]:
         out = []
         for key, item in value.items():
             if not (isinstance(key, str) and key.lower() in _FIELD_NAMES):
-                out.append(str(key))
+                out.extend(_addresses(str(key)))
             out.extend(_scalar_dests(item))
         return out
-    return [str(value)]
+    return _addresses(str(value))
 
 
 def destination_count(args: dict[str, object]) -> int:
@@ -240,13 +241,13 @@ class ContractEngine:
         # arg as a destination, so a forgotten declaration can never leave a sink
         # unguarded.
         sinks = policy.sink_params or tuple(call.args.keys())
-        dests = [(p, v) for p in sinks if p in call.args for v in _flat(call.args[p])]
+        dests = [(p, v) for p in sinks if p in call.args for v in _scalar_dests(call.args[p])]
         # Fail-closed again: declared sinks that are all absent (or all empty,
         # like `to: []`) mean the real destination is somewhere the policy does
         # not name — e.g. `recipients=` vs `to=` — so treat every arg as a sink
         # rather than silently allowing an unseen destination.
         if not dests:
-            dests = [(p, v) for p in call.args for v in _flat(call.args[p])]
+            dests = [(p, v) for p in call.args for v in _scalar_dests(call.args[p])]
         # Nothing at all to vouch for: an exfiltrating call with an implicit
         # destination (a reply to the sender, say). Never a silent ALLOW.
         if not dests:
@@ -281,7 +282,7 @@ class ContractEngine:
         return pending_ask
 
     def _is_trusted(self, tool: str, param: str, value: str, policy: ToolPolicy) -> bool:
-        norm_allow = {normalize(_bare_address(d)) for d in policy.trusted_destinations}
+        norm_allow = {normalize(a) for d in policy.trusted_destinations for a in _addresses(d)}
         if normalize(value) in norm_allow:
             return True
         return self._approvals.is_approved(approval_key(tool, param, value))
@@ -291,15 +292,10 @@ class ContractEngine:
             return TrustLevel.TRUSTED
         if self._taint.classify(value):
             return TrustLevel.TAINTED
-        # An address inside a longer string ("a@x, b@y", "mailto:b@y?..."):
-        # one tainted piece is enough to DENY. Pieces that are themselves
-        # trusted are skipped, so a trusted sender seen in output doesn't.
-        for piece in _embedded_addresses(value):
-            if piece != value and not self._is_trusted(tool, param, piece, policy) \
-                    and self._taint.classify(piece):
+        # Taint-only forms (an address in a URL query, one without its +tag).
+        # Forms that are themselves trusted are skipped.
+        for variant in _taint_variants(value):
+            if not self._is_trusted(tool, param, variant, policy) \
+                    and self._taint.classify(variant):
                 return TrustLevel.TAINTED
         return TrustLevel.UNPROVEN
-
-
-def _flat(value: object) -> list[str]:
-    return [_bare_address(v) for v in _scalar_dests(value)]

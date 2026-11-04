@@ -16,7 +16,7 @@ import pytest
 
 from bouncer.approvals import ApprovalStore
 from bouncer.audit import AuditLog
-from bouncer.engine import ContractEngine, _bare_address
+from bouncer.engine import ContractEngine
 from bouncer.policy import PolicyResolver
 from bouncer.taint import TaintTracker
 from bouncer.types import ToolCall, ToolPolicy, Verdict
@@ -225,14 +225,19 @@ def test_ask_prompt_shows_odd_param_names_quoted(tmp_path: Path) -> None:
 # --- Availability ------------------------------------------------------------
 
 
-def test_display_name_parse_is_linear(tmp_path: Path) -> None:
-    # The display-name regex backtracked quadratically on "<a@a@a@...": an
-    # agent-supplied 160 KB destination stalled the (single-threaded) gate for
-    # minutes.
-    value = "x <" + "a@" * 20_000
+@pytest.mark.parametrize("value", [
+    "x <" + "a@" * 20_000,       # the old display-name regex
+    "a" * 40_000 + " @x.com",    # the address-token regex
+    "a." * 20_000 + "@",
+])
+def test_long_destination_is_gated_in_linear_time(tmp_path: Path, value: str) -> None:
+    # Address parsing backtracked quadratically on runs like these: an
+    # agent-supplied destination of ~160 KB held the (single-threaded) gate
+    # for minutes.
+    eng = _engine(tmp_path)
     start = time.perf_counter()
-    _bare_address(value)
-    assert time.perf_counter() - start < 0.5
+    assert _send(eng, to=value) is not Verdict.ALLOW
+    assert time.perf_counter() - start < 1.0
 
 
 # --- Held up: pinned so they stay that way -------------------------------------
@@ -305,8 +310,8 @@ def test_unpacked_tool_with_unrecognized_destination_name_is_gated(tmp_path: Pat
     assert d.verdict is not Verdict.ALLOW
 
 
-@pytest.mark.xfail(strict=True, reason="documented B: a recipient string is one destination")
 def test_string_of_trusted_addresses_allows(tmp_path: Path) -> None:
+    # Was a documented B; splitting with getaddresses (0151ae2) fixed it.
     pol = ToolPolicy(name="send_email", exfiltrating=True, sink_params=("to",),
                      trusted_destinations=("alice@corp.com", "bob@corp.com"))
     eng = _engine(tmp_path, pol)

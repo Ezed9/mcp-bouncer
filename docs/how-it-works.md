@@ -90,8 +90,10 @@ Four deterministic contract types, checked in this order (`ContractEngine._decid
      whitespace, Unicode compatibility forms (full-width `＠`) and zero-width
      characters, then match as a whole token against everything the session
      has seen returned from an upstream tool (also in percent- and
-     HTML-entity-decoded form). Addresses inside a longer destination string
-     (`a@x, b@y`, `mailto:`, a URL query) are checked one by one. It decides `deny` vs.
+     HTML-entity-decoded form). A recipient string is split into its
+     addresses (`email.utils.getaddresses`, `;` read as `,`), every
+     address-shaped token in it is gated too, and an address inside a URL
+     query or without its `+tag` is checked for taint. It decides `deny` vs.
      `ask`, never `deny` vs. silent `allow`. A missed match goes to a human
      instead of being allowed.
 
@@ -358,14 +360,13 @@ recording is the scripted helpdesk demo in
 - **Matching folds some encodings, not all.** Taint matching folds case,
   whitespace, Unicode compatibility forms and zero-width characters, decodes
   percent-encoding and HTML entities in output, and checks addresses inside
-  longer strings, with a trailing dot or `+tag` removed. Base64,
+  URLs and without a trailing dot or `+tag`. Base64,
   quoted-printable, homoglyphs, punycode, `-` subaddressing and assembled
   addresses are not recognized, so they get `ask`, not `deny`.
 - **Identity is ASCII-case-insensitive.** The allowlist and approvals compare
   destinations after trimming, collapsing whitespace and lowercasing ASCII
   letters, so URLs differing only in path case are one destination. Non-ASCII
   letters compare exactly.
-- **Composite destinations are vouched for whole.** A recipient string with
-  several addresses, or a structured recipient with a `name` field, asks even
-  when every address in it is allowlisted. (A tainted address inside one still
-  denies.)
+- **A structured recipient's name is gated.** `{"email": ..., "name": ...}`
+  asks even when the address is allowlisted, because the name is checked as a
+  destination too. (A tainted address inside one still denies.)
