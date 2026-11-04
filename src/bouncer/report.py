@@ -334,11 +334,16 @@ def _audit_section(audit: AuditSummary | None) -> list[str]:
         f"| allow | {v['allow']} |",
         f"| ask | {v['ask']} |",
         f"| deny | {v['deny']} |",
+        *([f"| approve (out of band) | {v['approve']} |"] if v["approve"] else []),
         f"| **total** | **{audit.total}** |",
         "",
         "`ask` is an escalation, not an outcome: an approved ask is followed by an "
         "`allow` line for the same call; a declined one is blocked with no further "
         "line.",
+        *([
+            "An `approve` line is a human running `bouncer approve` for a client that "
+            "cannot ask: the asked call was blocked, and its retry has the `allow` line."
+        ] if v["approve"] else []),
         "",
         "| Tool | allow | ask | deny | total |",
         "|---|---|---|---|---|",

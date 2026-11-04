@@ -165,15 +165,40 @@ class ContractEngine:
     def on_approved(self, key: str) -> None:
         self._approvals.approve(key)
 
-    def evaluate(self, call: ToolCall, *, count_budget: bool = True) -> Decision:
-        decision = self._decide(call, count_budget)
+    def evaluate(
+        self,
+        call: ToolCall,
+        *,
+        count_budget: bool = True,
+        granted: frozenset[str] = frozenset(),
+    ) -> Decision:
+        """Decide and audit one call.
+
+        `granted` holds approval keys that count as approved for this
+        evaluation only, without being remembered: the proxy's one-time
+        approvals for clients that cannot elicit.
+        """
+        decision = self._decide(call, count_budget, granted)
         self._audit.write(AuditEntry(
             tool=call.tool, args=call.args, verdict=decision.verdict.value,
             reason=decision.reason, contract=decision.contract,
         ))
         return decision
 
-    def _decide(self, call: ToolCall, count_budget: bool = True) -> Decision:
+    def preview(self, call: ToolCall, granted: frozenset[str]) -> Decision:
+        """What `evaluate` would decide with `granted`. No audit line, no budget.
+
+        For a lookahead over a call that will not be forwarded on this attempt:
+        an `allow` it finds must not be logged as if the call ran.
+        """
+        return self._decide(call, count_budget=False, granted=granted)
+
+    def _decide(
+        self,
+        call: ToolCall,
+        count_budget: bool = True,
+        granted: frozenset[str] = frozenset(),
+    ) -> Decision:
         schema = self._schemas.get(call.tool)
         if schema is None:
             return Decision(Verdict.ASK, "unknown tool (not pinned at startup)", "pinning")
@@ -188,7 +213,7 @@ class ContractEngine:
         if constraint is not None:
             return constraint
 
-        sink = self._check_sink_gate(call, policy)  # implemented in Task 9
+        sink = self._check_sink_gate(call, policy, granted)
         if sink is not None:
             return sink
 
@@ -234,7 +259,9 @@ class ContractEngine:
                 )
         return None
 
-    def _check_sink_gate(self, call: ToolCall, policy: ToolPolicy) -> Decision | None:
+    def _check_sink_gate(
+        self, call: ToolCall, policy: ToolPolicy, granted: frozenset[str] = frozenset()
+    ) -> Decision | None:
         if not policy.exfiltrating:
             return None
         # Fail-closed: an exfiltrating tool with no declared sinks treats every
@@ -252,7 +279,7 @@ class ContractEngine:
         # destination (a reply to the sender, say). Never a silent ALLOW.
         if not dests:
             key = approval_key(call.tool, "", "")
-            if self._approvals.is_approved(key):
+            if key in granted or self._approvals.is_approved(key):
                 return None
             return Decision(
                 Verdict.ASK, "no destination is visible in this call", "sink_gate",
@@ -263,7 +290,7 @@ class ContractEngine:
         # A list/tuple sink is a set of destinations; classify each element so
         # a tainted address hidden in a multi-recipient list still DENYs.
         for param, value in dests:
-            trust = self._trust_of(call.tool, param, value, policy)
+            trust = self._trust_of(call.tool, param, value, policy, granted)
             if trust is TrustLevel.TAINTED:
                 return Decision(
                     Verdict.DENY,
@@ -281,21 +308,28 @@ class ContractEngine:
                 )
         return pending_ask
 
-    def _is_trusted(self, tool: str, param: str, value: str, policy: ToolPolicy) -> bool:
+    def _is_trusted(
+        self, tool: str, param: str, value: str, policy: ToolPolicy,
+        granted: frozenset[str] = frozenset(),
+    ) -> bool:
         norm_allow = {normalize(a) for d in policy.trusted_destinations for a in _addresses(d)}
         if normalize(value) in norm_allow:
             return True
-        return self._approvals.is_approved(approval_key(tool, param, value))
+        key = approval_key(tool, param, value)
+        return key in granted or self._approvals.is_approved(key)
 
-    def _trust_of(self, tool: str, param: str, value: str, policy: ToolPolicy) -> TrustLevel:
-        if self._is_trusted(tool, param, value, policy):
+    def _trust_of(
+        self, tool: str, param: str, value: str, policy: ToolPolicy,
+        granted: frozenset[str] = frozenset(),
+    ) -> TrustLevel:
+        if self._is_trusted(tool, param, value, policy, granted):
             return TrustLevel.TRUSTED
         if self._taint.classify(value):
             return TrustLevel.TAINTED
         # Taint-only forms (an address in a URL query, one without its +tag).
         # Forms that are themselves trusted are skipped.
         for variant in _taint_variants(value):
-            if not self._is_trusted(tool, param, variant, policy) \
+            if not self._is_trusted(tool, param, variant, policy, granted) \
                     and self._taint.classify(variant):
                 return TrustLevel.TAINTED
         return TrustLevel.UNPROVEN
