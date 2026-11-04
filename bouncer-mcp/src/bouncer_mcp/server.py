@@ -17,11 +17,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import jsonschema
 import mcp.types as mcp_types
 import yaml
-from mcp.server.lowlevel import NotificationOptions, Server
+from mcp.server import NotificationOptions, Server, ServerRequestContext
 from mcp.server.stdio import stdio_server
-from pydantic import AnyUrl
 
 from bouncer.approvals import ApprovalStore
 from bouncer.audit import AuditLog
@@ -49,7 +49,7 @@ def get_builtin_tools() -> list[mcp_types.Tool]:
                 "security contracts and return the verdict (ALLOW, DENY, or ASK) "
                 "with the underlying reason, without executing the tool."
             ),
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "required": ["tool"],
                 "properties": {
@@ -84,7 +84,7 @@ def get_builtin_tools() -> list[mcp_types.Tool]:
                 "Validate a YAML policy string against Bouncer's schema and report "
                 "syntax validity, contract rules count, and covered tools."
             ),
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "required": ["policy_yaml"],
                 "properties": {
@@ -101,7 +101,7 @@ def get_builtin_tools() -> list[mcp_types.Tool]:
                 "Inspect all active contract packs (builtin rules for filesystem, "
                 "gmail, slack, github, gdrive) and user overrides loaded by Bouncer."
             ),
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "pack_name": {
@@ -119,7 +119,7 @@ def get_builtin_tools() -> list[mcp_types.Tool]:
                 "Retrieve recent audit log entries from Bouncer showing allowed, "
                 "denied, and asked tool calls with their timestamps and reasons."
             ),
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "limit": {
@@ -369,16 +369,16 @@ def get_builtin_resources() -> list[mcp_types.Resource]:
     """Return Bouncer's native MCP resources."""
     return [
         mcp_types.Resource(
-            uri=AnyUrl("bouncer://policies/builtin"),
+            uri="bouncer://policies/builtin",
             name="Bouncer Builtin Policies",
             description="Active curated security packs and deterministic contract schemas.",
-            mimeType="application/json",
+            mime_type="application/json",
         ),
         mcp_types.Resource(
-            uri=AnyUrl("bouncer://audit/summary"),
+            uri="bouncer://audit/summary",
             name="Bouncer Audit Log Summary",
             description="Recent audit trail of deterministic verdicts (ALLOW/DENY/ASK).",
-            mimeType="application/json",
+            mime_type="application/json",
         ),
     ]
 
@@ -393,8 +393,8 @@ def handle_builtin_resource(uri: str) -> mcp_types.ReadResourceResult | None:
         return mcp_types.ReadResourceResult(
             contents=[
                 mcp_types.TextResourceContents(
-                    uri=AnyUrl(uri),
-                    mimeType="application/json",
+                    uri=uri,
+                    mime_type="application/json",
                     text=json.dumps(data, indent=2),
                 )
             ]
@@ -418,8 +418,8 @@ def handle_builtin_resource(uri: str) -> mcp_types.ReadResourceResult | None:
         return mcp_types.ReadResourceResult(
             contents=[
                 mcp_types.TextResourceContents(
-                    uri=AnyUrl(uri),
-                    mimeType="application/json",
+                    uri=uri,
+                    mime_type="application/json",
                     text=json.dumps(summary, indent=2),
                 )
             ]
@@ -432,48 +432,77 @@ def register_builtin_handlers(
     server: Server, user_policy: Path | None = None
 ) -> None:
     """Register Bouncer's native tools, prompts, and resources on an MCP server."""
+    tools = {tool.name: tool for tool in get_builtin_tools()}
 
-    @server.list_tools()
-    async def _list_tools() -> list[mcp_types.Tool]:
-        return get_builtin_tools()
+    async def _list_tools(
+        ctx: ServerRequestContext, params: mcp_types.PaginatedRequestParams | None
+    ) -> mcp_types.ListToolsResult:
+        return mcp_types.ListToolsResult(tools=list(tools.values()))
 
-    @server.call_tool()
     async def _call_tool(
-        name: str, arguments: dict[str, Any]
+        ctx: ServerRequestContext, params: mcp_types.CallToolRequestParams
     ) -> mcp_types.CallToolResult:
-        res = handle_builtin_tool_call(name, arguments, user_policy=user_policy)
-        if res is not None:
-            return res
-        return mcp_types.CallToolResult(
-            content=[
-                mcp_types.TextContent(type="text", text=f"Unknown tool {name}")
-            ],
-            isError=True,
-        )
+        name = params.name
+        arguments = dict(params.arguments or {})
+        # The 1.x decorator validated input and turned exceptions into error
+        # results; the 2.x low-level Server does neither, so we do it here.
+        try:
+            tool = tools.get(name)
+            if tool is not None:
+                try:
+                    jsonschema.validate(instance=arguments, schema=tool.input_schema)
+                except jsonschema.ValidationError as exc:
+                    return _error_result(f"Input validation error: {exc.message}")
+            res = handle_builtin_tool_call(name, arguments, user_policy=user_policy)
+            if res is not None:
+                return res
+            return _error_result(f"Unknown tool {name}")
+        except Exception as exc:
+            return _error_result(str(exc))
 
-    @server.list_prompts()
-    async def _list_prompts() -> list[mcp_types.Prompt]:
-        return get_builtin_prompts()
+    async def _list_prompts(
+        ctx: ServerRequestContext, params: mcp_types.PaginatedRequestParams | None
+    ) -> mcp_types.ListPromptsResult:
+        return mcp_types.ListPromptsResult(prompts=get_builtin_prompts())
 
-    @server.get_prompt()
     async def _get_prompt(
-        name: str, arguments: dict[str, str] | None
+        ctx: ServerRequestContext, params: mcp_types.GetPromptRequestParams
     ) -> mcp_types.GetPromptResult:
-        res = handle_builtin_prompt(name, arguments)
+        res = handle_builtin_prompt(params.name, params.arguments)
         if res is not None:
             return res
-        raise ValueError(f"Unknown prompt {name}")
+        raise ValueError(f"Unknown prompt {params.name}")
 
-    @server.list_resources()
-    async def _list_resources() -> list[mcp_types.Resource]:
-        return get_builtin_resources()
+    async def _list_resources(
+        ctx: ServerRequestContext, params: mcp_types.PaginatedRequestParams | None
+    ) -> mcp_types.ListResourcesResult:
+        return mcp_types.ListResourcesResult(resources=get_builtin_resources())
 
-    @server.read_resource()
-    async def _read_resource(uri: str) -> mcp_types.ReadResourceResult:
-        res = handle_builtin_resource(uri)
+    async def _read_resource(
+        ctx: ServerRequestContext, params: mcp_types.ReadResourceRequestParams
+    ) -> mcp_types.ReadResourceResult:
+        res = handle_builtin_resource(params.uri)
         if res is not None:
             return res
-        raise ValueError(f"Unknown resource {uri}")
+        raise ValueError(f"Unknown resource {params.uri}")
+
+    server.add_request_handler("tools/list", mcp_types.PaginatedRequestParams, _list_tools)
+    server.add_request_handler("tools/call", mcp_types.CallToolRequestParams, _call_tool)
+    server.add_request_handler("prompts/list", mcp_types.PaginatedRequestParams, _list_prompts)
+    server.add_request_handler("prompts/get", mcp_types.GetPromptRequestParams, _get_prompt)
+    server.add_request_handler(
+        "resources/list", mcp_types.PaginatedRequestParams, _list_resources
+    )
+    server.add_request_handler(
+        "resources/read", mcp_types.ReadResourceRequestParams, _read_resource
+    )
+
+
+def _error_result(text: str) -> mcp_types.CallToolResult:
+    return mcp_types.CallToolResult(
+        content=[mcp_types.TextContent(type="text", text=text)],
+        is_error=True,
+    )
 
 
 async def run_standalone_server(

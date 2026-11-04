@@ -67,6 +67,10 @@ the workspace. Output goes to `examples/demo/out/`.
 uv tool install bouncer-mcp          # or: pipx install bouncer-mcp (Python 3.12+)
 ```
 
+`bouncer-mcp` needs the MCP Python SDK 2.x (`mcp>=2,<3`). `uv tool` and pipx
+give it its own environment; if you `pip install` it next to a package pinned
+to mcp 1.x, stay on `bouncer-mcp` 0.1.4.
+
 Back up your client config, then wrap its servers:
 
 ```bash

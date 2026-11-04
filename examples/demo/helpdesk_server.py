@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 DATA = Path(sys.argv[1]).resolve()
 
@@ -31,7 +31,7 @@ TICKETS = {
     ),
 }
 
-mcp = FastMCP("helpdesk", log_level="WARNING")
+mcp = MCPServer("helpdesk", log_level="WARNING")
 
 
 def _customers() -> list[dict[str, str]]:
