@@ -12,6 +12,11 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
   appeared, because the match was a plain substring check; it now gets `ask`.
   A trailing "." or "-" doesn't stop a match, so an address at the end of a
   sentence is still denied. Reported in #2.
+- A recipient written with a display name, like `Dana <dana@globex.example>`, is
+  now gated on the address inside the brackets. Before, a trusted address in that
+  form wasn't recognized as trusted (so it asked, or was denied if it had appeared
+  in tool output), and a tainted address in that form got `ask` instead of `deny`.
+  Approvals cover both forms. Reported on r/mcp.
 
 ## [0.1.4] - 2026-10-24
 

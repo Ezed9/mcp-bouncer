@@ -28,6 +28,17 @@ def _normeq(s: str) -> str:
     return os.path.normpath(str(s))
 
 
+# "Dana <dana@x.com>" or '"Dana" <dana@x.com>': the address inside the brackets.
+_DISPLAY_NAME = re.compile(r"^[^<>@]*<\s*([^<>\s]+@[^<>\s]+)\s*>\s*$")
+
+
+def _bare_address(value: str) -> str:
+    # Gate on the address, not the display name, so the allowlist, approvals
+    # and taint all see "Dana <dana@x.com>" and "dana@x.com" as one recipient.
+    m = _DISPLAY_NAME.match(value)
+    return m.group(1) if m else value
+
+
 def _scalar_dests(value: object) -> list[str]:
     # Flatten a sink arg into its scalar destination strings. A list/tuple/set
     # (multi-recipient shapes) is all destinations; a dict (a structured
@@ -187,7 +198,7 @@ class ContractEngine:
                 continue
             # A list/tuple sink is a set of destinations; classify each element so
             # a tainted address hidden in a multi-recipient list still DENYs.
-            for value in _scalar_dests(call.args[param]):
+            for value in map(_bare_address, _scalar_dests(call.args[param])):
                 trust = self._trust_of(call.tool, param, value, policy)
                 if trust is TrustLevel.TAINTED:
                     return Decision(
@@ -205,7 +216,7 @@ class ContractEngine:
         return pending_ask
 
     def _trust_of(self, tool: str, param: str, value: str, policy: ToolPolicy) -> TrustLevel:
-        norm_allow = {normalize(d) for d in policy.trusted_destinations}
+        norm_allow = {normalize(_bare_address(d)) for d in policy.trusted_destinations}
         if normalize(value) in norm_allow:
             return TrustLevel.TRUSTED
         if self._approvals.is_approved(approval_key(tool, param, str(value))):

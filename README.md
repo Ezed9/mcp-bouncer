@@ -374,7 +374,7 @@ ambiguous case resolves to `ask` or `deny`, never a silent `allow`.
 
 ```bash
 uv sync --all-packages
-uv run pytest -q        # 156 tests (3 need the benchmark extra)
+uv run pytest -q        # 160 tests (3 need the benchmark extra)
 uv run ruff check .
 ```
 

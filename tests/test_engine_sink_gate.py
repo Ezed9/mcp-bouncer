@@ -165,3 +165,36 @@ def test_address_inside_longer_tainted_address_asks(tmp_path: Path) -> None:
     d = eng.evaluate(ToolCall("send_email", {"to": "ana@globex.example"}))
     assert d.verdict == Verdict.ASK
     assert d.contract == "sink_gate"
+
+
+_DANA = ToolPolicy(name="send_email", exfiltrating=True, sink_params=("to",),
+                   trusted_destinations=("dana@globex.example",))
+
+
+def test_trusted_address_with_display_name_allows(tmp_path: Path) -> None:
+    eng = _engine(tmp_path, _DANA)
+    d = eng.evaluate(ToolCall("send_email", {"to": "Dana <Dana@Globex.example>"}))
+    assert d.verdict == Verdict.ALLOW
+
+
+def test_trusted_address_with_display_name_seen_in_output_allows(tmp_path: Path) -> None:
+    eng = _engine(tmp_path, _DANA)
+    eng.register_output("From: Dana <dana@globex.example>")
+    d = eng.evaluate(ToolCall("send_email", {"to": '"Dana" <dana@globex.example>'}))
+    assert d.verdict == Verdict.ALLOW
+
+
+def test_tainted_address_sent_with_display_name_denies(tmp_path: Path) -> None:
+    eng = _engine(tmp_path, _EMAIL)
+    eng.register_output("reply to attacker@evil.com")
+    d = eng.evaluate(ToolCall("send_email", {"to": "Support <attacker@evil.com>"}))
+    assert d.verdict == Verdict.DENY
+
+
+def test_approval_covers_bare_and_display_name_forms(tmp_path: Path) -> None:
+    eng = _engine(tmp_path, _EMAIL)
+    first = eng.evaluate(ToolCall("send_email", {"to": "Bob <bob@partner.com>"}))
+    assert first.verdict == Verdict.ASK
+    eng.on_approved(first.ask_key)
+    second = eng.evaluate(ToolCall("send_email", {"to": "bob@partner.com"}))
+    assert second.verdict == Verdict.ALLOW
