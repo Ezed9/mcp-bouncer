@@ -200,7 +200,7 @@ async def test_route_async_allow_relays_structured_content(tmp_path: Path) -> No
     )
     assert verdict == Verdict.ALLOW
     assert result is upstream  # full result relayed verbatim
-    assert result.structuredContent == {"content": "file has attacker@evil.com"}
+    assert result.structured_content == {"content": "file has attacker@evil.com"}
     # taint saw the text, so the address in the output is now tainted
     assert eng._taint.classify("attacker@evil.com") is True
 
@@ -222,8 +222,8 @@ async def test_route_async_deny_returns_error_without_forwarding(
     result, verdict = await proxy_route(eng, fake_forward)
     assert verdict == Verdict.DENY
     assert called["forwarded"] is False
-    assert result.isError is True
-    assert result.structuredContent is None
+    assert result.is_error is True
+    assert result.structured_content is None
     assert "[bouncer blocked]" in result.content[0].text
 
 
@@ -349,3 +349,27 @@ def test_route_ask_approve_then_tainted_after_progress_denies(tmp_path: Path) ->
     )
     assert verdict == Verdict.DENY
     assert called["forwarded"] is False
+
+
+class _FakeSession:
+    def __init__(self, can_send_request: bool, elicitation: bool) -> None:
+        self.can_send_request = can_send_request
+        self._elicitation = elicitation
+
+    def check_client_capability(self, capability: mcp_types.ClientCapabilities) -> bool:
+        return self._elicitation
+
+
+class _FakeCtx:
+    def __init__(self, session: _FakeSession) -> None:
+        self.session = session
+
+
+def test_make_elicit_fails_closed_without_a_back_channel(tmp_path: Path) -> None:
+    # ASK must fail closed when the client lacks elicitation, and also when the
+    # connection cannot carry a server-to-client request at all (mcp 2.x,
+    # protocol 2026-07-28), even if the client declared elicitation.
+    proxy = BouncerProxy(_engine(tmp_path, ToolPolicy(name="read_file")), session=None)
+    assert proxy._make_elicit(_FakeCtx(_FakeSession(True, True))) is not None
+    assert proxy._make_elicit(_FakeCtx(_FakeSession(True, False))) is None
+    assert proxy._make_elicit(_FakeCtx(_FakeSession(False, True))) is None

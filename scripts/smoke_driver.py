@@ -29,7 +29,7 @@ def _text(result: object) -> str:
         t = getattr(block, "text", None)
         if t is not None:
             parts.append(str(t))
-    is_err = getattr(result, "isError", False)
+    is_err = getattr(result, "is_error", False)
     prefix = "ERROR/DENY: " if is_err else "OK: "
     return prefix + " | ".join(parts)
 

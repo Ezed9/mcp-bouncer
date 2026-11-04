@@ -20,10 +20,12 @@ from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from pathlib import Path
 
+import jsonschema
 import mcp.types as mcp_types
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp.server.lowlevel import NotificationOptions, Server
+from mcp.server import NotificationOptions, Server, ServerRequestContext
+from mcp.server.runner import serve_loop
 from mcp.server.stdio import stdio_server
 
 from bouncer.approvals import ApprovalStore
@@ -123,15 +125,19 @@ def _result_text(result: mcp_types.CallToolResult) -> str:
 def _denied_result(reason: str) -> mcp_types.CallToolResult:
     """A Bouncer DENY surfaced as an error tool-result — no upstream forward.
 
-    `isError=True` and no `structuredContent`: the model reads the deny reason
-    as a tool error, distinct from an upstream error. Returning a bare
-    `CallToolResult` makes the low-level SDK relay it verbatim (it does not
-    re-validate a returned `CallToolResult` against the tool's outputSchema),
-    so an unstructured deny is safe even for tools that declare an outputSchema.
+    `is_error=True` and no `structured_content`: the model reads the deny reason
+    as a tool error, distinct from an upstream error. The low-level SDK relays a
+    returned `CallToolResult` verbatim (it does not validate it against the
+    tool's outputSchema), so an unstructured deny is safe even for tools that
+    declare an outputSchema.
     """
+    return _error_result(f"[bouncer blocked] {reason}")
+
+
+def _error_result(text: str) -> mcp_types.CallToolResult:
     return mcp_types.CallToolResult(
-        content=[mcp_types.TextContent(type="text", text=f"[bouncer blocked] {reason}")],
-        isError=True,
+        content=[mcp_types.TextContent(type="text", text=text)],
+        is_error=True,
     )
 
 
@@ -201,7 +207,7 @@ class BouncerProxy:
             listed = await session.list_tools()
             tools = list(listed.tools)
             schemas: dict[str, dict[str, object]] = {
-                tool.name: dict(tool.inputSchema or {}) for tool in tools
+                tool.name: dict(tool.input_schema or {}) for tool in tools
             }
 
             engine = ContractEngine(
@@ -217,44 +223,63 @@ class BouncerProxy:
     async def _run_server(
         self, server_name: str, tools: list[mcp_types.Tool]
     ) -> None:
-        server: Server = Server(server_name)
+        by_name = {tool.name: tool for tool in tools}
 
         # Proxy mode exposes ONLY the upstream tools. Bouncer's own management
         # surface (bouncer_check_verdict, bouncer_audit_summary, ...) lives in
         # `bouncer serve`; here it would be reachable by the very agent being
         # constrained, outside the engine and the audit log, and could forge
         # audit lines or read every wrapped server's logged arguments.
-        @server.list_tools()
-        async def _list_tools() -> list[mcp_types.Tool]:
-            return tools
+        async def _list_tools(
+            ctx: ServerRequestContext, params: mcp_types.PaginatedRequestParams | None
+        ) -> mcp_types.ListToolsResult:
+            return mcp_types.ListToolsResult(tools=tools)
 
-        @server.call_tool()
         async def _call_tool(
-            name: str, arguments: dict[str, object]
+            ctx: ServerRequestContext, params: mcp_types.CallToolRequestParams
         ) -> mcp_types.CallToolResult:
-            ctx = server.request_context
-            call = ToolCall(tool=name, args=arguments)
+            name = params.name
+            arguments: dict[str, object] = dict(params.arguments or {})
+            # The 2.x low-level Server neither validates input nor turns handler
+            # exceptions into error results; the 1.x decorator did both, so we
+            # keep doing them here.
+            try:
+                tool = by_name.get(name)
+                if tool is not None:
+                    try:
+                        jsonschema.validate(instance=arguments, schema=tool.input_schema)
+                    except jsonschema.ValidationError as exc:
+                        return _error_result(f"Input validation error: {exc.message}")
 
-            async def do_forward() -> mcp_types.CallToolResult:
-                # Relay the FULL upstream result so its structuredContent and
-                # content survive to the client and the SDK's outputSchema
-                # validation passes. `register_output` still gets the flattened
-                # text for taint; that split happens in `_route_async`.
-                return await self._upstream.call_tool(name, arguments)
+                call = ToolCall(tool=name, args=arguments)
 
-            elicit = self._make_elicit(ctx)
-            result, _verdict = await self._route_async(call, do_forward, elicit)
-            # DENY: an error result returned WITHOUT forwarding and WITHOUT
-            # fabricated structuredContent (the SDK relays a returned
-            # CallToolResult as-is). ALLOW/ASK-approved: the upstream
-            # CallToolResult, relayed verbatim.
-            return result
+                async def do_forward() -> mcp_types.CallToolResult:
+                    # Relay the FULL upstream result so its structured_content
+                    # and content survive to the client. `register_output` still
+                    # gets the flattened text for taint; that split happens in
+                    # `_route_async`.
+                    return await self._upstream.call_tool(name, arguments)
 
+                elicit = self._make_elicit(ctx)
+                result, _verdict = await self._route_async(call, do_forward, elicit)
+                # DENY: an error result returned WITHOUT forwarding and WITHOUT
+                # fabricated structured_content. ALLOW/ASK-approved: the
+                # upstream CallToolResult, relayed verbatim.
+                return result
+            except Exception as exc:
+                return _error_result(str(exc))
+
+        server: Server = Server(
+            server_name, on_list_tools=_list_tools, on_call_tool=_call_tool
+        )
         options = server.create_initialization_options(
             notification_options=NotificationOptions()
         )
-        async with stdio_server() as (read, write):
-            await server.run(read, write, options)
+        # Handshake era only. `server.run` would also serve 2026-07-28, which
+        # has no server-to-client requests, so ASK could never elicit there.
+        # 2.x clients in mode="auto" fall back to the handshake on their own.
+        async with stdio_server() as (read, write), server.lifespan(server) as state:
+            await serve_loop(server, read, write, lifespan_state=state, init_options=options)
 
     async def _route_async(
         self,
@@ -271,8 +296,9 @@ class BouncerProxy:
         policy; this keeps line-for-line parity with it.
 
         Unlike the pure helper (which relays flattened text), this returns the
-        FULL upstream `CallToolResult` on ALLOW so `structuredContent`, `content`,
-        and `isError` reach the client intact; taint still sees only the text.
+        FULL upstream `CallToolResult` on ALLOW so `structured_content`,
+        `content`, and `is_error` reach the client intact; taint still sees only
+        the text.
         """
         decision = self._engine.evaluate(call)
 
@@ -306,23 +332,24 @@ class BouncerProxy:
     ) -> mcp_types.CallToolResult:
         """Forward upstream, feed the output to taint, and relay the full result.
 
-        Both text blocks AND structuredContent are recorded as untrusted: modern
-        servers return destinations (emails, urls) only via structuredContent, so
-        ignoring it would blind the taint tracker to those values.
+        Both text blocks AND structured_content are recorded as untrusted: modern
+        servers return destinations (emails, urls) only via structured_content,
+        so ignoring it would blind the taint tracker to those values.
         """
         result = await forward()
         self._engine.register_output(_result_text(result))
-        if result.structuredContent is not None:
-            self._engine.register_output(json.dumps(result.structuredContent, default=str))
+        if result.structured_content is not None:
+            self._engine.register_output(json.dumps(result.structured_content, default=str))
         return result
 
     def _make_elicit(self, ctx: object) -> AsyncElicit:
         """Return an async elicit callable, or None if the client can't elicit.
 
-        Detects the client's elicitation capability; if absent, ASK fails closed.
+        Detects the client's elicitation capability, and that the connection
+        can carry a server-to-client request at all; if not, ASK fails closed.
         """
         session = getattr(ctx, "session", None)
-        if session is None:
+        if session is None or not session.can_send_request:
             return None
         supports = session.check_client_capability(
             mcp_types.ClientCapabilities(
@@ -335,7 +362,7 @@ class BouncerProxy:
         async def _elicit(message: str) -> bool:  # pragma: no cover - live path
             result = await session.elicit(
                 message=message,
-                requestedSchema={"type": "object", "properties": {}},
+                requested_schema={"type": "object", "properties": {}},
             )
             return result.action == "accept"
 
