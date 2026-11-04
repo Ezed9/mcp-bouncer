@@ -8,12 +8,12 @@ license = "MIT"
 dependencies = [
     "bouncer-core==0.1.4",
     "anyio>=4.0",
-    # mcp 2.0 (2026-07-28) removed the low-level Server decorators this proxy is
-    # built on. Capped until the 2.x migration lands; 1.28 is the version CI
-    # has always run.
-    "mcp>=1.28,<2",
-    # Imported directly for AnyUrl; mcp 1.x already requires pydantic 2.
-    "pydantic>=2,<3",
+    # Built on the 2.x low-level Server (on_* handlers, snake_case fields).
+    # 1.x is not supported: its decorator API is gone in 2.x. The suite passes
+    # on 2.0.0 through 2.3.0.
+    "mcp>=2,<3",
+    # Imported directly for input validation; mcp 2.x already requires it.
+    "jsonschema>=4.20",
 ]
 
 [project.urls]

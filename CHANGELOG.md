@@ -6,6 +6,21 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 
 ## [Unreleased]
 
+### Changed
+- `bouncer-mcp` runs on the MCP Python SDK 2.x (`mcp>=2,<3`), so it can be
+  installed next to other packages that need mcp 2. It no longer installs with
+  mcp 1.x; 0.1.4 is the last release for 1.x. What the proxy does is unchanged:
+  tool names are pinned at startup, every call goes through the engine, ASK is
+  asked through elicitation, results are relayed with `structuredContent`, and
+  the `bouncer_*` tools are not exposed.
+- The proxy speaks only the `initialize`-handshake protocol versions, not
+  2026-07-28, which has no server-to-client requests and so no way to ask the
+  user. mcp 2.x clients fall back to the handshake on their own. If a
+  connection still can't carry the request, ASK is denied, as it is for a
+  client without elicitation.
+- `bouncer-mcp` depends on `jsonschema` directly (for input validation, which
+  the 2.x low-level server no longer does) and no longer on `pydantic`.
+
 ### Fixed
 - A destination is tainted only when it appears in earlier tool output as a whole
   token. Before, `ana@globex.example` was denied after `dana@globex.example` had

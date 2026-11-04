@@ -40,7 +40,7 @@ def test_tool_check_verdict_allows_safe_call() -> None:
         },
     )
     assert res is not None
-    assert not res.isError
+    assert not res.is_error
     data = json.loads(res.content[0].text)
     assert data["verdict"] == "allow"
     assert data["tool"] == "send_email"
@@ -61,7 +61,7 @@ def test_tool_check_verdict_denies_tainted_call() -> None:
         },
     )
     assert res is not None
-    assert not res.isError
+    assert not res.is_error
     data = json.loads(res.content[0].text)
     assert data["verdict"] == "deny"
 

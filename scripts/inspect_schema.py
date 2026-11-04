@@ -27,7 +27,7 @@ async def main() -> None:
         for t in listed.tools:
             if t.name in ("read_file", "write_file"):
                 print(f"### {t.name}")
-                print("outputSchema:", json.dumps(t.outputSchema))
+                print("outputSchema:", json.dumps(t.output_schema))
                 print()
 
 

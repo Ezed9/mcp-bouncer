@@ -25,8 +25,8 @@ import anyio
 from bouncer_mcp.cli import main as bouncer_cli
 from bouncer_mcp.cli import rewrite_config
 from mcp import ClientSession, StdioServerParameters
+from mcp.client import ClientRequestContext
 from mcp.client.stdio import stdio_client
-from mcp.shared.context import RequestContext
 from mcp.types import CallToolResult, ElicitRequestParams, ElicitResult
 
 HERE = Path(__file__).resolve().parent
@@ -82,7 +82,7 @@ def _setup(out: Path) -> tuple[Path, Path, Path]:
 
 
 async def _human(
-    context: RequestContext[ClientSession, object], params: ElicitRequestParams
+    context: ClientRequestContext, params: ElicitRequestParams
 ) -> ElicitResult:
     print(f"      {_color('ASK  ', '1;33')} {params.message}")
     _pause(1.2)
@@ -104,7 +104,7 @@ async def _agent(home: Path, config: Path, out: Path) -> None:
     ):
         await session.initialize()
         listed = await session.list_tools()
-        tools = [t.model_dump(mode="json") for t in listed.tools
+        tools = [t.model_dump(mode="json", by_alias=True) for t in listed.tools
                  if not t.name.startswith("bouncer_")]
         (out / "tools.json").write_text(json.dumps({"tools": tools}, indent=2))
 
