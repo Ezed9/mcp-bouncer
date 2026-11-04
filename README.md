@@ -238,7 +238,9 @@ Report vulnerabilities privately: [`SECURITY.md`](SECURITY.md).
   send through another, and the destination is `ask`, not `deny`. Restarting
   the proxy clears what it has seen.
 - **Matching is literal.** A destination is tainted only if it appears in
-  earlier output after case and whitespace normalization. An encoded or
+  earlier output, after case and whitespace normalization, as a whole token:
+  `ana@x.com` inside `dana@x.com` doesn't count, so an attacker address glued
+  to other text gets `ask`, not `deny`. An encoded or
   assembled address gets `ask`, not `deny`. Destinations shorter than six
   characters are never marked tainted. A trusted-looking destination that also
   appears in tool output (a channel name in a message, say) is denied, which
@@ -372,7 +374,7 @@ ambiguous case resolves to `ask` or `deny`, never a silent `allow`.
 
 ```bash
 uv sync --all-packages
-uv run pytest -q        # 150 tests (3 need the benchmark extra)
+uv run pytest -q        # 156 tests (3 need the benchmark extra)
 uv run ruff check .
 ```
 

@@ -156,3 +156,12 @@ def test_int_sink_value_is_classified(tmp_path: Path) -> None:
     d = eng.evaluate(ToolCall("send_email", {"to": 12345}))
     assert d.verdict == Verdict.ASK
     assert d.contract == "sink_gate"
+
+
+def test_address_inside_longer_tainted_address_asks(tmp_path: Path) -> None:
+    # Issue #2: dana@ in a ticket must not turn a send to ana@ into a DENY.
+    eng = _engine(tmp_path, _EMAIL)
+    eng.register_output("Customers: dana@globex.example, bill@initech.example")
+    d = eng.evaluate(ToolCall("send_email", {"to": "ana@globex.example"}))
+    assert d.verdict == Verdict.ASK
+    assert d.contract == "sink_gate"

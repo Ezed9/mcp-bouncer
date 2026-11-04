@@ -3,9 +3,10 @@
 
 Every untrusted tool output is recorded (normalized). A later argument value is
 `tainted` iff it appears verbatim (modulo case/whitespace) inside some recorded
-output. This decides DENY vs ASK in the sink gate — it is NOT the safety
-mechanism (deny-unless-trusted is), so approximate matching is acceptable: a
-missed match degrades to ASK, never to a silent ALLOW.
+output as a whole token: `ana@x.com` inside `dana@x.com` does not count. This
+decides DENY vs ASK in the sink gate — it is NOT the safety mechanism
+(deny-unless-trusted is), so approximate matching is acceptable: a missed match
+degrades to ASK, never to a silent ALLOW.
 """
 
 from __future__ import annotations
@@ -13,6 +14,11 @@ from __future__ import annotations
 import re
 
 _WS = re.compile(r"\s+")
+# A match must not be glued to more address characters on either side. A
+# trailing "." or "-" only continues the token if more word characters follow,
+# so "attacker@evil.com." at the end of a sentence still matches.
+_BEFORE = r"(?<![\w.%+\-])"
+_AFTER = r"(?![\w%+@]|[.\-]\w)"
 
 
 def normalize(text: str) -> str:
@@ -31,4 +37,5 @@ class TaintTracker:
         needle = normalize(value)
         if len(needle) < self._min_len:
             return False
-        return any(needle in hay for hay in self._outputs)
+        pattern = re.compile(_BEFORE + re.escape(needle) + _AFTER)
+        return any(pattern.search(hay) for hay in self._outputs)

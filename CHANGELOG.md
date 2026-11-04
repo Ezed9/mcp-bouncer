@@ -6,6 +6,13 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 
 ## [Unreleased]
 
+### Fixed
+- A destination is tainted only when it appears in earlier tool output as a whole
+  token. Before, `ana@globex.example` was denied after `dana@globex.example` had
+  appeared, because the match was a plain substring check; it now gets `ask`.
+  A trailing "." or "-" doesn't stop a match, so an address at the end of a
+  sentence is still denied. Reported in #2.
+
 ## [0.1.4] - 2026-10-24
 
 ### Changed
