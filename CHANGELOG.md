@@ -17,6 +17,53 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
   form wasn't recognized as trusted (so it asked, or was denied if it had appeared
   in tool output), and a tainted address in that form got `ask` instead of `deny`.
   Approvals cover both forms. Reported on r/mcp.
+- A quoted display name may contain "@" or ",": `"alice@corp.com" <alice@corp.com>`
+  and `"Doe, Alice" <alice@corp.com>` are recognized as the bracketed address.
+  Before, they got `ask` even when the address was allowlisted.
+- In proxy mode, a recipient nested inside a list or a dict could make the
+  approval loop run out of rounds and deny a call after the human had approved
+  every destination. The round bound now counts destinations the way the gate
+  does.
+- The display-name check no longer backtracks quadratically. A destination like
+  `x <a@a@a@...>` of about 160 KB held the gate for minutes.
+
+### Security
+Findings from an adversarial review of the sink gate. Each one let an
+`exfiltrating` call get `allow` without its destination being vouched for.
+- A dict-valued sink had only its values checked. A recipient map keyed by
+  address, like `{"attacker@evil.com": []}`, was allowed. Dict keys are now
+  checked unless they are a known field name (`email`, `name`, `emailAddress`, …).
+- A declared sink that was present but empty (`to: []`) stopped the fail-closed
+  sweep of all arguments, so `{"to": [], "recipients": ["attacker@evil.com"]}`
+  was allowed. An empty declared sink now counts as absent, and an exfiltrating
+  call with no destination anywhere (`{}`, `{"to": []}`) gets `ask`.
+- `attacker, Alice <alice@corp.com>` was read as one display name and gated
+  only on `alice@corp.com`. An unquoted "," or ";" now ends the display name, so
+  the whole string is checked and gets `ask`.
+- The allowlist and approvals used Unicode lowercasing, which maps KELVIN SIGN
+  (U+212A) to "k": `Kate@corp.com` matched an allowlisted `kate@corp.com`.
+  They now lowercase ASCII letters only, so `JOSÉ@x.es` no longer matches an
+  allowlisted `josé@x.es`.
+- With a persisted `ApprovalStore(path)` (library API; the CLI keeps approvals
+  in memory), an agent-chosen argument name containing a newline could write a
+  second, forged key into the file, which approved another destination after a
+  reload. Approval keys are now a one-line JSON array. Keys persisted by 0.1.4
+  or earlier no longer match, so those destinations are asked about again.
+
+### Changed
+- Taint matching is wider (it can only turn `ask` into `deny`): full-width
+  forms and zero-width characters are folded, percent-encoding and HTML
+  entities in output are decoded, and an address inside a longer destination
+  (`a@x.com, b@y.com`, `mailto:a@x.com?…`, a URL query) or with a trailing dot or
+  `+tag` is checked on its own. Allowlisted addresses inside such a string are
+  skipped, so a trusted sender seen in output does not deny the list.
+- `ask` and `deny` reasons show a non-ASCII destination in escaped form too,
+  since a Cyrillic "а" looks like "a" in an approval prompt, and quote an
+  argument name that isn't a plain identifier.
+- README Limits and `docs/how-it-works.md` list what is still not caught:
+  base64, quoted-printable, homoglyphs, punycode, `-` subaddressing, URL path
+  case in approvals, composite destinations asking as a whole, and unpacked
+  tools whose destination parameter has an unrecognized name.
 
 ## [0.1.4] - 2026-10-24
 

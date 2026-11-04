@@ -29,7 +29,23 @@ def _normeq(s: str) -> str:
 
 
 # "Dana <dana@x.com>" or '"Dana" <dana@x.com>': the address inside the brackets.
-_DISPLAY_NAME = re.compile(r"^[^<>@]*<\s*([^<>\s]+@[^<>\s]+)\s*>\s*$")
+# A quoted name may hold anything ("@", ","); an unquoted one may not hold "@",
+# "," or ";", since to an address parser those start another recipient
+# ("attacker, Alice <alice@x.com>" is two). The address's local part excludes
+# "@" so the match cannot backtrack quadratically on "<a@a@a@...".
+_DISPLAY_NAME = re.compile(
+    r'^(?:"(?:[^"\\]|\\.)*"|[^<>@",;])*<\s*([^<>\s@,;]+@[^<>\s,;]+)\s*>\s*$'
+)
+# Characters that separate addresses inside a longer destination string:
+# lists ("a@x, b@y"), brackets, quotes, "mailto:" and URL query syntax.
+_ADDRESS_SEPARATORS = re.compile(r"[\s<>()\[\],;:\"'`?&=/]+")
+# Keys of a structured recipient ({"email": ..., "name": ...}) that name a
+# field rather than being a destination. Any other dict key is gated as a
+# destination, since a recipient map can be keyed by address.
+_FIELD_NAMES = frozenset({
+    "email", "emailaddress", "email_address", "address", "name", "displayname",
+    "display_name", "type", "role", "id", "user", "channel", "url",
+})
 
 
 def _bare_address(value: str) -> str:
@@ -39,13 +55,30 @@ def _bare_address(value: str) -> str:
     return m.group(1) if m else value
 
 
+def _embedded_addresses(value: str) -> list[str]:
+    # Address-shaped pieces of a longer destination, plus the forms that reach
+    # the same mailbox: without trailing dots (an absolute domain) and without
+    # a "+tag". Used only to find taint (DENY), never to grant trust.
+    out: list[str] = []
+    for piece in _ADDRESS_SEPARATORS.split(value):
+        if "@" not in piece:
+            continue
+        piece = piece.rstrip(".")
+        out.append(piece)
+        local, _, domain = piece.partition("@")
+        if "+" in local:
+            out.append(local.split("+", 1)[0] + "@" + domain)
+    return out
+
+
 def _scalar_dests(value: object) -> list[str]:
     # Flatten a sink arg into its scalar destination strings. A list/tuple/set
     # (multi-recipient shapes) is all destinations; a dict (a structured
-    # recipient like {"email": ...}) contributes its values; nested containers
+    # recipient like {"email": ...}, or a map keyed by address) contributes its
+    # values and every key that is not a known field name; nested containers
     # flatten recursively. Flattening — rather than str()-ing the container —
-    # keeps each address exposed to taint's substring match so a tainted
-    # address nested in a structure still DENYs instead of downgrading to ASK.
+    # keeps each address exposed to taint so a tainted address nested in a
+    # structure still DENYs instead of downgrading to ASK.
     if isinstance(value, (list, tuple, set, frozenset)):
         out: list[str] = []
         for item in value:
@@ -53,10 +86,32 @@ def _scalar_dests(value: object) -> list[str]:
         return out
     if isinstance(value, dict):
         out = []
-        for item in value.values():
+        for key, item in value.items():
+            if not (isinstance(key, str) and key.lower() in _FIELD_NAMES):
+                out.append(str(key))
             out.extend(_scalar_dests(item))
         return out
     return [str(value)]
+
+
+def destination_count(args: dict[str, object]) -> int:
+    """How many destinations the sink gate can ask about for these args (>= 1).
+
+    The proxy's ASK loop uses it as its round bound: each approval proves one.
+    """
+    return max(sum(len(_scalar_dests(v)) for v in args.values()), 1)
+
+
+def _show(value: str) -> str:
+    # The reason string is what a human approves. A homoglyph ("а", Cyrillic)
+    # looks exactly like ASCII, so non-ASCII also gets an escaped form.
+    return repr(value) if value.isascii() else f"{value!r} (as ASCII: {ascii(value)})"
+
+
+def _show_param(param: str) -> str:
+    # Arg names can be agent-chosen (the all-args fallback): quote odd ones so
+    # a newline in a name cannot lay out a fake prompt.
+    return param if param.isascii() and param.isidentifier() else repr(param)
 
 
 def _within_prefix(value: str, prefix: str) -> bool:
@@ -185,42 +240,66 @@ class ContractEngine:
         # arg as a destination, so a forgotten declaration can never leave a sink
         # unguarded.
         sinks = policy.sink_params or tuple(call.args.keys())
-        # Fail-closed again: declared sinks that are ALL absent from this call
-        # mean the policy was written for a different schema (e.g. `to=` vs
-        # `recipients=`) and the real destination is invisible — treat every
-        # arg as a sink rather than silently allowing an unseen destination.
-        if not any(param in call.args for param in sinks):
-            sinks = tuple(call.args.keys())
+        dests = [(p, v) for p in sinks if p in call.args for v in _flat(call.args[p])]
+        # Fail-closed again: declared sinks that are all absent (or all empty,
+        # like `to: []`) mean the real destination is somewhere the policy does
+        # not name — e.g. `recipients=` vs `to=` — so treat every arg as a sink
+        # rather than silently allowing an unseen destination.
+        if not dests:
+            dests = [(p, v) for p in call.args for v in _flat(call.args[p])]
+        # Nothing at all to vouch for: an exfiltrating call with an implicit
+        # destination (a reply to the sender, say). Never a silent ALLOW.
+        if not dests:
+            key = approval_key(call.tool, "", "")
+            if self._approvals.is_approved(key):
+                return None
+            return Decision(
+                Verdict.ASK, "no destination is visible in this call", "sink_gate",
+                ask_key=key,
+            )
 
         pending_ask: Decision | None = None
-        for param in sinks:
-            if param not in call.args:
-                continue
-            # A list/tuple sink is a set of destinations; classify each element so
-            # a tainted address hidden in a multi-recipient list still DENYs.
-            for value in map(_bare_address, _scalar_dests(call.args[param])):
-                trust = self._trust_of(call.tool, param, value, policy)
-                if trust is TrustLevel.TAINTED:
-                    return Decision(
-                        Verdict.DENY,
-                        f"destination {param}={value!r} came from untrusted data",
-                        "sink_gate",
-                    )
-                if trust is TrustLevel.UNPROVEN and pending_ask is None:
-                    pending_ask = Decision(
-                        Verdict.ASK,
-                        f"destination {param}={value!r} is not a vouched recipient",
-                        "sink_gate",
-                        ask_key=approval_key(call.tool, param, value),
-                    )
+        # A list/tuple sink is a set of destinations; classify each element so
+        # a tainted address hidden in a multi-recipient list still DENYs.
+        for param, value in dests:
+            trust = self._trust_of(call.tool, param, value, policy)
+            if trust is TrustLevel.TAINTED:
+                return Decision(
+                    Verdict.DENY,
+                    f"destination {_show_param(param)}={_show(value)} "
+                    "came from untrusted data",
+                    "sink_gate",
+                )
+            if trust is TrustLevel.UNPROVEN and pending_ask is None:
+                pending_ask = Decision(
+                    Verdict.ASK,
+                    f"destination {_show_param(param)}={_show(value)} "
+                    "is not a vouched recipient",
+                    "sink_gate",
+                    ask_key=approval_key(call.tool, param, value),
+                )
         return pending_ask
 
-    def _trust_of(self, tool: str, param: str, value: str, policy: ToolPolicy) -> TrustLevel:
+    def _is_trusted(self, tool: str, param: str, value: str, policy: ToolPolicy) -> bool:
         norm_allow = {normalize(_bare_address(d)) for d in policy.trusted_destinations}
         if normalize(value) in norm_allow:
+            return True
+        return self._approvals.is_approved(approval_key(tool, param, value))
+
+    def _trust_of(self, tool: str, param: str, value: str, policy: ToolPolicy) -> TrustLevel:
+        if self._is_trusted(tool, param, value, policy):
             return TrustLevel.TRUSTED
-        if self._approvals.is_approved(approval_key(tool, param, str(value))):
-            return TrustLevel.TRUSTED
-        if self._taint.classify(str(value)):
+        if self._taint.classify(value):
             return TrustLevel.TAINTED
+        # An address inside a longer string ("a@x, b@y", "mailto:b@y?..."):
+        # one tainted piece is enough to DENY. Pieces that are themselves
+        # trusted are skipped, so a trusted sender seen in output doesn't.
+        for piece in _embedded_addresses(value):
+            if piece != value and not self._is_trusted(tool, param, piece, policy) \
+                    and self._taint.classify(piece):
+                return TrustLevel.TAINTED
         return TrustLevel.UNPROVEN
+
+
+def _flat(value: object) -> list[str]:
+    return [_bare_address(v) for v in _scalar_dests(value)]

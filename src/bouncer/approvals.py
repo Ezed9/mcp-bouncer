@@ -8,13 +8,18 @@ persistence makes an approval survive across sessions per project.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .taint import normalize
 
 
 def approval_key(tool: str, sink_param: str, destination: str) -> str:
-    return f"{tool}\x1f{sink_param}\x1f{normalize(destination)}"
+    # A JSON array with ensure_ascii: always one line of printable ASCII and
+    # unambiguous. The sink param can be an agent-chosen arg name (the gate's
+    # all-args fallback), and the persisted store is one key per line, so a
+    # raw newline in it must not be able to write a second, forged key.
+    return json.dumps([tool, sink_param, normalize(destination)])
 
 
 class ApprovalStore:
