@@ -80,9 +80,20 @@ Four deterministic contract types, checked in this order (`ContractEngine._decid
    - List-valued sinks (e.g. multiple `cc` recipients) are classified
      element-by-element, so one tainted address hidden in a list of otherwise
      fine ones still denies the whole call.
-   - This is a value-level taint check (`src/bouncer/taint.py`):
-     normalize case/whitespace, then substring-match against everything the
-     session has seen returned from an upstream tool. It decides `deny` vs.
+   - A dict-valued sink (a structured recipient) is checked on its values and
+     on every key that is not a known field name (`email`, `name`, …), so a
+     recipient map keyed by address is gated too.
+   - Declared sinks that are absent *or empty* (`to: []`) trigger the
+     all-args sweep, and an exfiltrating call with no destination anywhere
+     gets `ask`.
+   - This is a value-level taint check (`src/bouncer/taint.py`): fold case,
+     whitespace, Unicode compatibility forms (full-width `＠`) and zero-width
+     characters, then match as a whole token against everything the session
+     has seen returned from an upstream tool (also in percent- and
+     HTML-entity-decoded form). A recipient string is split into its
+     addresses (`email.utils.getaddresses`, `;` read as `,`), every
+     address-shaped token in it is gated too, and an address inside a URL
+     query or without its `+tag` is checked for taint. It decides `deny` vs.
      `ask`, never `deny` vs. silent `allow`. A missed match goes to a human
      instead of being allowed.
 
@@ -332,8 +343,8 @@ recording is the scripted helpdesk demo in
   names absent from the startup snapshot are treated as unknown.
 - **Sink params must be complete for your server.** The gate inspects the
   `sink_params` you declare (plus a fail-closed sweep of *all* args when a
-  tool's declared sinks are entirely absent from a call — the schema-mismatch
-  guard). But if a tool exposes a destination-bearing argument you did **not**
+  tool's declared sinks are absent from a call or carry no destination, like
+  `to: []` — the schema-mismatch guard). But if a tool exposes a destination-bearing argument you did **not**
   declare *alongside* one you did (e.g. you declare `to` and the server also
   accepts an undeclared `recipients`), the undeclared field is treated as
   content, not a destination, and a value placed there is not gated. Undeclared
@@ -341,4 +352,21 @@ recording is the scripted helpdesk demo in
   enumerate every recipient/destination argument your actual server accepts in
   your pack. The curated packs aim to be complete for the servers they name;
   verify against your server's `tools/list`.
-
+- **Heuristics recognize names, not meaning.** A tool with no pack or user
+  entry is treated as exfiltrating only if a parameter has a destination-shaped
+  name (`to`, `cc`, `bcc`, `recipient(s)`, `url`, `email`, `address`,
+  `channel`, `share_with`). A destination in `webhook_url` or `endpoint` is not
+  gated; write a policy entry for such tools.
+- **Matching folds some encodings, not all.** Taint matching folds case,
+  whitespace, Unicode compatibility forms and zero-width characters, decodes
+  percent-encoding and HTML entities in output, and checks addresses inside
+  URLs and without a trailing dot or `+tag`. Base64,
+  quoted-printable, homoglyphs, punycode, `-` subaddressing and assembled
+  addresses are not recognized, so they get `ask`, not `deny`.
+- **Identity is ASCII-case-insensitive.** The allowlist and approvals compare
+  destinations after trimming, collapsing whitespace and lowercasing ASCII
+  letters, so URLs differing only in path case are one destination. Non-ASCII
+  letters compare exactly.
+- **A structured recipient's name is gated.** `{"email": ..., "name": ...}`
+  asks even when the address is allowlisted, because the name is checked as a
+  destination too. (A tainted address inside one still denies.)

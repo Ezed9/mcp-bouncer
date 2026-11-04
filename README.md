@@ -241,22 +241,35 @@ Report vulnerabilities privately: [`SECURITY.md`](SECURITY.md).
 - **Taint is per wrapped server and per session.** Read through one server and
   send through another, and the destination is `ask`, not `deny`. Restarting
   the proxy clears what it has seen.
-- **Matching is literal.** A destination is tainted only if it appears in
-  earlier output, after case and whitespace normalization, as a whole token:
-  `ana@x.com` inside `dana@x.com` doesn't count, so an attacker address glued
-  to other text gets `ask`, not `deny`. An encoded or
-  assembled address gets `ask`, not `deny`. Destinations shorter than six
+- **Matching is literal, with a little folding.** A destination is tainted
+  only if it appears in earlier output as a whole token: `ana@x.com` inside
+  `dana@x.com` doesn't count, so an attacker address glued to other text gets
+  `ask`, not `deny`. Before matching, case, whitespace, full-width forms and
+  zero-width characters are folded, and percent-encoding and HTML entities in
+  output are decoded. An address inside a URL query, or sent with a trailing
+  dot or a `+tag`, is checked too. Base64, quoted-printable, homoglyphs (Cyrillic `а`
+  for `a`), punycode, `-` subaddressing and assembled addresses ("attacker at
+  evil dot com") get `ask`, not `deny`. Destinations shorter than six
   characters are never marked tainted. A trusted-looking destination that also
   appears in tool output (a channel name in a message, say) is denied, which
   costs legitimate tasks.
+- **Allowlist and approvals ignore ASCII case and surrounding whitespace.**
+  Approving `https://hooks.example/AbC` also approves `https://hooks.example/abc`.
+  Other characters compare exactly, so `JOSÉ@x.es` and `josé@x.es` are two
+  destinations.
+- **A structured recipient's name is checked too.**
+  `{"email": "alice@corp.com", "name": "Alice"}` asks even when the address is
+  allowlisted, because `Alice` is gated as a destination.
 - **Lexical path checks.** `..` is collapsed but symlinks are not resolved.
 - **Pinned names only.** A changed schema for a tool that existed at startup
   is not detected.
 - **It does not vet malicious servers.** It constrains a well-meaning agent
   fed malicious data.
 - **Undeclared destination arguments aren't checked** if a tool has other
-  declared ones. A pack must list every recipient-type argument the server
-  accepts.
+  declared ones that carry a destination. A pack must list every
+  recipient-type argument the server accepts. A tool with no pack entry is
+  gated only if a parameter has a destination-shaped name (`to`, `cc`, `url`,
+  `channel`, …); `webhook_url`, say, is not recognized.
 - **A budget limits damage; it doesn't deny the first call.** Use
   `max_calls: 0` to forbid a tool.
 
@@ -378,7 +391,7 @@ ambiguous case resolves to `ask` or `deny`, never a silent `allow`.
 
 ```bash
 uv sync --all-packages
-uv run pytest -q        # 165 tests (3 need the benchmark extra)
+uv run pytest -q        # 221 tests (3 need the benchmark extra)
 uv run ruff check .
 ```
 

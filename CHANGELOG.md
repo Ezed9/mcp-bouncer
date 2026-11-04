@@ -38,6 +38,41 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
   suggested on r/mcp, and every address-shaped token in the raw value is checked
   too, so an address the parser reads as a comment or display name can't slip
   past a trusted one. URLs are not split.
+- **Security:** a dict-valued sink had only its values checked, so a recipient
+  map keyed by address, like `{"attacker@evil.com": []}`, was allowed. Dict keys
+  are now checked unless they are a known field name (`email`, `name`,
+  `emailAddress`, …).
+- **Security:** a declared sink that was present but empty (`to: []`) stopped the
+  fail-closed sweep of all arguments, so
+  `{"to": [], "recipients": ["attacker@evil.com"]}` was allowed. An empty
+  declared sink now counts as absent, and an exfiltrating call with no
+  destination anywhere (`{}`, `{"to": []}`) gets `ask`.
+- **Security:** the allowlist and approvals used Unicode lowercasing, which maps
+  KELVIN SIGN (U+212A) to "k", so `\u212Aate@corp.com` matched an allowlisted
+  `kate@corp.com`. They now lowercase ASCII letters only, so `JOSÉ@x.es` no
+  longer matches an allowlisted `josé@x.es`.
+- **Security:** with a persisted `ApprovalStore(path)` (library API; the CLI keeps
+  approvals in memory), an agent-chosen argument name containing a newline could
+  write a second, forged key into the file, which approved another destination
+  after a reload. Approval keys are now a one-line JSON array. Keys persisted by
+  0.1.4 or earlier no longer match, so those destinations are asked about again.
+- Taint matching is wider (it can only turn `ask` into `deny`): full-width forms
+  and zero-width characters are folded, percent-encoding and HTML entities in
+  output are decoded, and an address inside a URL query or with a `+tag` is
+  checked on its own.
+- The address-token regex no longer backtracks quadratically. A destination made
+  of a long run of address characters (about 160 KB) held the gate for minutes.
+- In proxy mode, a recipient nested inside a list or a dict could make the
+  approval loop run out of rounds and deny a call after the human had approved
+  every destination. The round bound now counts destinations the way the gate
+  does.
+- `ask` and `deny` reasons show a non-ASCII destination in escaped form too,
+  since a Cyrillic "а" looks like "a" in an approval prompt, and quote an
+  argument name that isn't a plain identifier.
+- README Limits and `docs/how-it-works.md` list what is still not caught:
+  base64, quoted-printable, homoglyphs, punycode, `-` subaddressing, URL path
+  case in approvals, a structured recipient's name being gated, and unpacked
+  tools whose destination parameter has an unrecognized name.
 
 ## [0.1.4] - 2026-10-24
 

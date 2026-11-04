@@ -351,6 +351,29 @@ def test_route_ask_approve_then_tainted_after_progress_denies(tmp_path: Path) ->
     assert called["forwarded"] is False
 
 
+def test_route_ask_loop_bound_counts_nested_destinations(tmp_path: Path) -> None:
+    # A nested list or a recipient dict holds more destinations than its
+    # top-level length. The round bound counted 1 for it, so after the human
+    # approved both recipients the loop ran out and DENIED the approved send.
+    pol = ToolPolicy(name="send_email", exfiltrating=True, sink_params=("to",))
+    eng = _engine(tmp_path, pol)
+    asked: list[str] = []
+
+    def fake_elicit(msg: str) -> bool:
+        asked.append(msg)
+        return True
+
+    text, verdict = route_call(
+        eng,
+        ToolCall("send_email", {"to": [["bob@partner.com", "carol@partner.com"]]}),
+        forward=lambda _c: "sent",
+        elicit=fake_elicit,
+    )
+    assert verdict == Verdict.ALLOW
+    assert text == "sent"
+    assert len(asked) == 2
+
+
 class _FakeSession:
     def __init__(self, can_send_request: bool, elicitation: bool) -> None:
         self.can_send_request = can_send_request

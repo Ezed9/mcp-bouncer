@@ -30,7 +30,7 @@ from mcp.server.stdio import stdio_server
 
 from bouncer.approvals import ApprovalStore
 from bouncer.audit import AuditLog
-from bouncer.engine import ContractEngine
+from bouncer.engine import ContractEngine, destination_count
 from bouncer.policy import PolicyResolver, builtin_pack_paths, load_policies
 from bouncer.taint import TaintTracker
 from bouncer.types import ToolCall, Verdict
@@ -103,13 +103,9 @@ def route_call(
 
 
 def _distinct_destination_count(call: ToolCall) -> int:
-    total = 0
-    for value in call.args.values():
-        if isinstance(value, (list, tuple)):
-            total += len(value)
-        else:
-            total += 1
-    return max(total, 1)
+    # Count the way the gate flattens (nested lists, dict values and keys), so
+    # a nested recipient list cannot run the loop out after the human approved.
+    return destination_count(call.args)
 
 
 def _result_text(result: mcp_types.CallToolResult) -> str:
