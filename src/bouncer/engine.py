@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+from email.utils import getaddresses
 from pathlib import PurePosixPath
 
 from .approvals import ApprovalStore, approval_key
@@ -28,15 +29,22 @@ def _normeq(s: str) -> str:
     return os.path.normpath(str(s))
 
 
-# "Dana <dana@x.com>" or '"Dana" <dana@x.com>': the address inside the brackets.
-_DISPLAY_NAME = re.compile(r"^[^<>@]*<\s*([^<>\s]+@[^<>\s]+)\s*>\s*$")
+_ADDRESS_TOKEN = re.compile(r"[\w.%+\-]+@[\w\-]+(?:\.[\w\-]+)*")
 
 
-def _bare_address(value: str) -> str:
-    # Gate on the address, not the display name, so the allowlist, approvals
-    # and taint all see "Dana <dana@x.com>" and "dana@x.com" as one recipient.
-    m = _DISPLAY_NAME.match(value)
-    return m.group(1) if m else value
+def _addresses(value: str) -> list[str]:
+    # Gate on addresses, not display names or list syntax, so the allowlist,
+    # approvals and taint see "Dana <dana@x.com>" and "dana@x.com" as one
+    # recipient, and "a@x.com, b@y.com" as two. URLs are left whole: the
+    # header parser would mangle them. Unparseable input stays as it is.
+    if "@" not in value or "://" in value:
+        return [value]
+    parsed = getaddresses([value.replace(";", ",").strip().strip(",")], strict=True)
+    found = [addr for _, addr in parsed if addr] or [value]
+    # The parser drops comments and display names, but the downstream tool may
+    # not, so every address-shaped token in the raw value is gated too.
+    seen = {normalize(a) for a in found}
+    return found + [t for t in _ADDRESS_TOKEN.findall(value) if normalize(t) not in seen]
 
 
 def _scalar_dests(value: object) -> list[str]:
@@ -56,7 +64,7 @@ def _scalar_dests(value: object) -> list[str]:
         for item in value.values():
             out.extend(_scalar_dests(item))
         return out
-    return [str(value)]
+    return _addresses(str(value))
 
 
 def _within_prefix(value: str, prefix: str) -> bool:
@@ -198,7 +206,7 @@ class ContractEngine:
                 continue
             # A list/tuple sink is a set of destinations; classify each element so
             # a tainted address hidden in a multi-recipient list still DENYs.
-            for value in map(_bare_address, _scalar_dests(call.args[param])):
+            for value in _scalar_dests(call.args[param]):
                 trust = self._trust_of(call.tool, param, value, policy)
                 if trust is TrustLevel.TAINTED:
                     return Decision(
@@ -216,7 +224,7 @@ class ContractEngine:
         return pending_ask
 
     def _trust_of(self, tool: str, param: str, value: str, policy: ToolPolicy) -> TrustLevel:
-        norm_allow = {normalize(_bare_address(d)) for d in policy.trusted_destinations}
+        norm_allow = {normalize(a) for d in policy.trusted_destinations for a in _addresses(d)}
         if normalize(value) in norm_allow:
             return TrustLevel.TRUSTED
         if self._approvals.is_approved(approval_key(tool, param, str(value))):

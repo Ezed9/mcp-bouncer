@@ -17,6 +17,12 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
   form wasn't recognized as trusted (so it asked, or was denied if it had appeared
   in tool output), and a tainted address in that form got `ask` instead of `deny`.
   Approvals cover both forms. Reported on r/mcp.
+- A recipient string holding several addresses (`"alice@corp.com, attacker@evil.com"`,
+  or `;`-separated) is now split and each address gated, so a tainted one denies
+  instead of getting `ask`. Parsing uses `email.utils.getaddresses` (strict), as
+  suggested on r/mcp, and every address-shaped token in the raw value is checked
+  too, so an address the parser reads as a comment or display name can't slip
+  past a trusted one. URLs are not split.
 
 ## [0.1.4] - 2026-10-24
 
