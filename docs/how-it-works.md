@@ -34,10 +34,15 @@ Every tool call resolves to exactly one of:
 - **deny** — never forwarded. The client gets `[bouncer blocked] <reason>`.
 - **ask** — the proxy asks the human via MCP
   [elicitation](https://modelcontextprotocol.io) for a one-time approval of
-  *this specific destination*. If the client doesn't support elicitation, or
-  the human declines, `ask` **fails closed to deny**. An approval is
-  remembered for the rest of the session, so a benign read-then-reply flow
-  only asks once per destination.
+  *this specific destination*. If the human declines, `ask` **fails closed to
+  deny**. An approval is remembered for the rest of the session, so a benign
+  read-then-reply flow only asks once per destination.
+  If the client doesn't support elicitation, `ask` is also a deny, and the
+  error carries a one-time code. A human runs `bouncer approve <code>` in their
+  own terminal, and a retry of a call to that destination passes once, within
+  five minutes. That approval is not remembered. A pinning `ask` (a tool that
+  was not present at startup) never gets a code. Design, research and client
+  support: [`clients-and-approvals.md`](clients-and-approvals.md).
 
 A `deny` verdict never calls into the upstream server — a blocked call has no
 side effects (`bouncer-mcp/src/bouncer_mcp/proxy.py`'s `route_call` / `_route_async`;

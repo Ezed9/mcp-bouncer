@@ -92,10 +92,25 @@ Three things to know on the first run:
 - **Your client must find `bouncer`.** The rewritten entry uses
   `"command": "bouncer"`. Desktop apps may not see your shell's `PATH`; if the
   server fails to start, replace it with the output of `which bouncer`.
-- **`ask` needs MCP elicitation.** A send to an unknown destination asks the
-  human through the client. If your client does not support elicitation, every
-  `ask` becomes a `deny`, so list your usual recipients in
-  `trusted_destinations` (see [Policy](#policy)).
+- **`ask` uses MCP elicitation when the client has it.** A send to an unknown
+  destination asks the human through the client, and a yes lasts the session.
+  If your client can't elicit, the call is denied with a one-time code:
+
+  ```text
+  [bouncer blocked] destination to='bob@partner.com' is not a vouched recipient
+  ... In their own terminal, not through the agent, they run: bouncer approve K7Q-F2M
+  ```
+
+  Run `bouncer approve K7Q-F2M` in your own terminal. It shows the server, tool
+  and destination and asks you to confirm. Then have the agent retry the same
+  call within five minutes. The approval allows one call to that destination,
+  and `bouncer pending` lists open codes. To stop typing codes for regular
+  recipients, list them in `trusted_destinations` (see [Policy](#policy)).
+  Which clients elicit: [`docs/clients-and-approvals.md`](docs/clients-and-approvals.md).
+- **If the agent has a shell, don't let it run `bouncer approve`.** The command
+  refuses to run without a terminal and has no `--yes` flag, but an agent with
+  full shell access can get around Bouncer anyway. In Claude Code, add
+  `"Bash(bouncer approve:*)"` to `permissions.deny`.
 - **Run `bouncer` with a subcommand.** With none, it starts Bouncer's own MCP
   server on stdio and waits for a client.
 
@@ -114,8 +129,9 @@ Three things to know on the first run:
   │      seen in this server's output   → deny        │
   │      allowlisted or approved        → allow       │
   │      can't tell                     → ask human   │
-  │                       (no answer or no support    │
-  │                        for asking = deny)         │
+  │                       (no answer = deny; client   │
+  │                        can't ask = deny + a code  │
+  │                        for `bouncer approve`)     │
   │ every verdict → ~/.bouncer/audit.jsonl            │
   └───────────────────────────────────────────────────┘
      │ allowed calls only                  ▲ every output is
@@ -272,6 +288,16 @@ Report vulnerabilities privately: [`SECURITY.md`](SECURITY.md).
   `channel`, …); `webhook_url`, say, is not recognized.
 - **A budget limits damage; it doesn't deny the first call.** Use
   `max_calls: 0` to forbid a tool.
+- **One-time approval codes (clients without elicitation) approve a
+  destination, not a message.** The code is bound to the server, tool,
+  argument and destination, so it can't approve anything else. The retry's
+  other arguments (subject, body) can differ from the blocked call's.
+  Each attempt, the blocked one included, uses a slot of the tool's call budget.
+  The state is a 0600 file, `~/.bouncer/pending.json`. The agent can't reach it
+  over MCP, but an agent with shell access as your user can. If the server's
+  reply repeats the address (`sent to bob@…`), the address is now in tool output,
+  and later sends to it are denied with no code. Add it to
+  `trusted_destinations` instead.
 
 Every limit in detail:
 [`docs/how-it-works.md#documented-limits`](docs/how-it-works.md#documented-limits).
@@ -391,7 +417,7 @@ ambiguous case resolves to `ask` or `deny`, never a silent `allow`.
 
 ```bash
 uv sync --all-packages
-uv run pytest -q        # 221 tests (3 need the benchmark extra)
+uv run pytest -q        # 253 tests (3 need the benchmark extra)
 uv run ruff check .
 ```
 

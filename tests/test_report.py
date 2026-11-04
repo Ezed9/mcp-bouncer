@@ -153,3 +153,19 @@ def test_load_tools_accepts_tools_list_result_and_bare_list(tmp_path: Path) -> N
     expected = [("send_email", {"properties": {"to": {}}})]
     assert load_tools(wrapped) == expected
     assert load_tools(bare) == expected
+
+
+def test_out_of_band_approvals_get_their_own_row(tmp_path: Path) -> None:
+    path = tmp_path / "audit.jsonl"
+    lines = [
+        {"ts": "2026-11-04T10:00:00+00:00", "tool": "send_email", "verdict": "ask",
+         "reason": "r", "contract": "sink_gate"},
+        {"ts": "2026-11-04T10:01:00+00:00", "tool": "send_email", "verdict": "approve",
+         "reason": "approved out of band by me: r", "contract": "out_of_band"},
+    ]
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    report = _report(audit=summarize_audit(path))
+    assert "| approve (out of band) | 1 |" in report
+    assert "`bouncer approve`" in report
+    # and a log without any has no such row
+    assert "approve (out of band)" not in _report(audit=summarize_audit(tmp_path / "x"))

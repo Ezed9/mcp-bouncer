@@ -11,6 +11,11 @@ incoming tools/call through `route_call`.
 All safety lives in the engine; this module only forwards, denies, or asks. No
 LLM and no network/async in the decision path — the transport layer is the only
 async part.
+
+A client that cannot elicit gets a one-time approval code instead of a prompt
+(`_without_elicitation`): the call is denied, the human runs `bouncer approve
+<code>` in their own terminal, and a retry of a call to the same destination
+passes once. Clients that can elicit never reach that path.
 """
 
 from __future__ import annotations
@@ -31,9 +36,10 @@ from mcp.server.stdio import stdio_server
 from bouncer.approvals import ApprovalStore
 from bouncer.audit import AuditLog
 from bouncer.engine import ContractEngine, destination_count
+from bouncer.pending import TTL_SECONDS, PendingApprovals, show_code
 from bouncer.policy import PolicyResolver, builtin_pack_paths, load_policies
 from bouncer.taint import TaintTracker
-from bouncer.types import ToolCall, Verdict
+from bouncer.types import Decision, ToolCall, Verdict
 
 # forward(call) -> upstream result text.
 Forward = Callable[[ToolCall], str]
@@ -51,6 +57,8 @@ def route_call(
     call: ToolCall,
     forward: Forward,
     elicit: Elicit,
+    pending: PendingApprovals | None = None,
+    server: str = "",
 ) -> tuple[str, Verdict]:
     """Route one tool call through the engine. A DENY never calls `forward`.
 
@@ -60,6 +68,9 @@ def route_call(
     call. The loop is bounded by the number of distinct sink destinations and
     makes strict progress (one destination proven per iteration), so it cannot
     spin.
+
+    Without elicitation, ASK goes to `_without_elicitation`: with no `pending`
+    store it is a DENY, as before; with one, a one-time approval code.
     """
     decision = engine.evaluate(call)
 
@@ -71,9 +82,14 @@ def route_call(
     if decision.verdict is Verdict.DENY:
         return f"[bouncer blocked] {decision.reason}", Verdict.DENY
 
-    # ASK. Fail closed if the client cannot elicit.
+    # ASK, and the client cannot elicit: deny, with a one-time code if possible.
     if elicit is None:
-        return f"[bouncer blocked] {decision.reason}", Verdict.DENY
+        blocked = _without_elicitation(engine, call, decision, pending, server)
+        if blocked is not None:
+            return blocked, Verdict.DENY
+        result = forward(call)
+        engine.register_output(result)
+        return result, Verdict.ALLOW
 
     # Bound the loop by the number of distinct sink destinations: every approval
     # proves one more, so at most that many ASK rounds can occur.
@@ -100,6 +116,83 @@ def route_call(
     # Loop exhausted without resolving (defensive; shouldn't happen given the
     # strict-progress bound). Fail closed.
     return f"[bouncer blocked] {decision.reason}", Verdict.DENY
+
+
+def _blocked(reason: str) -> str:
+    return f"[bouncer blocked] {reason}"
+
+
+def _without_elicitation(
+    engine: ContractEngine,
+    call: ToolCall,
+    decision: Decision,
+    pending: PendingApprovals | None,
+    server: str,
+) -> str | None:
+    """Resolve an ASK for a client that cannot elicit. None means forward.
+
+    Otherwise returns the blocked text. Every destination the engine asks
+    about must have an approved one-time code for this exact (server, approval
+    key); if any lacks one, codes are issued for all that lack one and the call
+    is denied. Codes are used up only when the call is forwarded, so approving
+    the second of two recipients doesn't waste the first.
+
+    Fail-closed cases, all DENY with no code: no store; a pinning ASK
+    (`ask_key` None); a DENY found on the way (a tainted recipient); too many
+    pending codes; an approval that expired or was used between the check and
+    the forward.
+    """
+    if pending is None or decision.ask_key is None:
+        return _blocked(decision.reason)
+    first_reason = decision.reason
+    granted: set[str] = set()
+    needed: list[tuple[str, str]] = []
+    for _ in range(_distinct_destination_count(call) + 1):
+        if decision.verdict is Verdict.ALLOW:
+            break
+        if decision.verdict is Verdict.DENY or decision.ask_key is None:
+            return _blocked(decision.reason)
+        if pending.is_approved(server, decision.ask_key):
+            granted.add(decision.ask_key)
+        else:
+            needed.append((decision.ask_key, decision.reason))
+        # A lookahead, not the real verdict: assume the missing approvals so
+        # the next destination surfaces. preview() logs no audit line.
+        decision = engine.preview(call, frozenset(granted | {k for k, _ in needed}))
+    else:
+        return _blocked(decision.reason)
+
+    if needed:
+        codes = pending.request(server, call.tool, needed)
+        if codes is None:
+            return _blocked(
+                f"{first_reason}; too many approvals are pending "
+                "(a human can run `bouncer pending` to review them)"
+            )
+        return _approval_needed(needed, codes)
+
+    if not pending.consume(server, granted):
+        return _blocked(f"{first_reason}; its one-time approval expired or was already used")
+    # The real, audited decision with the approvals this call just used.
+    final = engine.evaluate(call, count_budget=False, granted=frozenset(granted))
+    if final.verdict is not Verdict.ALLOW:
+        return _blocked(final.reason)
+    return None
+
+
+def _approval_needed(needed: list[tuple[str, str]], codes: list[str]) -> str:
+    shown = [show_code(c) for c in codes]
+    lines = [
+        _blocked(needed[0][1]),
+        "This MCP client can't ask the user to confirm, so this call needs a "
+        "one-time approval from a human. In their own terminal, not through the "
+        f"agent, they run: bouncer approve {' '.join(shown)}",
+        f"Then retry the same call within {TTL_SECONDS // 60} minutes. "
+        "The approval allows one call to this destination.",
+    ]
+    if len(needed) > 1:
+        lines += [f"{code}: {reason}" for code, (_, reason) in zip(shown, needed, strict=True)]
+    return "\n".join(lines)
 
 
 def _distinct_destination_count(call: ToolCall) -> int:
@@ -159,10 +252,15 @@ class BouncerProxy:
         engine: ContractEngine,
         session: ClientSession,
         user_policy: Path | None = None,
+        pending: PendingApprovals | None = None,
+        server_name: str = "",
     ) -> None:
         self._engine = engine
         self._upstream = session
         self._user_policy = user_policy
+        # Outside the MCP surface: a local 0600 file. Nothing here exposes it.
+        self._pending = pending
+        self._server_name = server_name
 
     @classmethod
     async def serve(
@@ -213,7 +311,10 @@ class BouncerProxy:
                 audit=AuditLog(_DEFAULT_AUDIT_PATH),
                 schemas=schemas,
             )
-            proxy = cls(engine, session, user_policy=user_policy)
+            proxy = cls(
+                engine, session, user_policy=user_policy,
+                pending=PendingApprovals(), server_name=server_name,
+            )
             await proxy._run_server(server_name, tools)
 
     async def _run_server(
@@ -305,7 +406,12 @@ class BouncerProxy:
             return _denied_result(decision.reason), Verdict.DENY
 
         if elicit is None:
-            return _denied_result(decision.reason), Verdict.DENY
+            blocked = _without_elicitation(
+                self._engine, call, decision, self._pending, self._server_name
+            )
+            if blocked is not None:
+                return _error_result(blocked), Verdict.DENY
+            return await self._forward_and_record(forward), Verdict.ALLOW
 
         max_rounds = _distinct_destination_count(call) + 1
         for _ in range(max_rounds):

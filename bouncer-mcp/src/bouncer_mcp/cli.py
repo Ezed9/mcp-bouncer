@@ -1,5 +1,6 @@
 # bouncer/src/bouncer/cli.py
-"""CLI: `bouncer init` (wrap servers in a client config), `bouncer run`, `bouncer report`.
+"""CLI: `bouncer init` (wrap servers in a client config), `bouncer run`, `bouncer report`,
+and `bouncer approve` / `bouncer pending` (one-time approvals for clients that cannot elicit).
 
 `rewrite_config` is pure and idempotent -- it stashes the ENTIRE original
 server entry (command, args, and anything else on it -- `env`, `cwd`, ...)
@@ -127,6 +128,79 @@ def _cmd_serve(user_policy: Path | None = None) -> int:
     return 0
 
 
+def _cmd_pending() -> int:
+    import time
+
+    from bouncer.pending import PendingApprovals, show_code
+
+    entries = PendingApprovals().active()
+    if not entries:
+        print("No pending approvals.")
+        return 0
+    now = time.time()
+    for e in entries:
+        state = "approved, waiting for the retry" if e.approved else "pending"
+        left = max(int(e.expires - now), 0)
+        print(f"{show_code(e.code)}  {e.server or '-'}  {e.tool}  {state}, "
+              f"expires in {left // 60}m{left % 60:02d}s")
+        print(f"         {e.reason}")
+    return 0
+
+
+def _cmd_approve(codes: list[str]) -> int:
+    """Approve one-time codes, after showing what each one allows.
+
+    Interactive only: stdin must be a terminal and every code is confirmed by
+    hand. There is no --yes flag, so an agent with a non-interactive shell
+    can't approve its own call by piping an answer in. (An agent with full
+    shell access can go around Bouncer anyway; see the README's Limits.)
+    """
+    import getpass
+
+    from bouncer.audit import AuditLog
+    from bouncer.pending import TTL_SECONDS, PendingApprovals, normalize_code, show_code
+    from bouncer.types import AuditEntry
+
+    if not sys.stdin.isatty():
+        print("bouncer approve must be run by a human in a terminal "
+              "(stdin is not a TTY).", file=sys.stderr)
+        return 2
+    store = PendingApprovals()
+    audit = AuditLog(Path.home() / ".bouncer" / "audit.jsonl")
+    status = 0
+    for raw in codes:
+        entry = store.get(raw)
+        if entry is None or entry.approved:
+            print(f"{show_code(normalize_code(raw))}: unknown, expired or already "
+                  "approved. `bouncer pending` lists open codes.", file=sys.stderr)
+            status = 1
+            continue
+        print(f"{show_code(entry.code)} on server {entry.server or '-'!r}, "
+              f"tool {entry.tool!r}:")
+        print(f"  {entry.reason}")
+        print("  Approving allows ONE retry of a call to this destination, "
+              f"within {TTL_SECONDS // 60} minutes.")
+        if input("Approve? [y/N] ").strip().lower() != "y":
+            print("Not approved.")
+            status = 1
+            continue
+        approved = store.approve(entry.code)
+        if approved is None:
+            print(f"{show_code(entry.code)} expired while waiting.", file=sys.stderr)
+            status = 1
+            continue
+        audit.write(AuditEntry(
+            tool=approved.tool,
+            args={"code": approved.code, "server": approved.server,
+                  "approval_key": approved.key},
+            verdict="approve",
+            reason=f"approved out of band by {getpass.getuser()}: {approved.reason}",
+            contract="out_of_band",
+        ))
+        print(f"Approved. Retry the call within {TTL_SECONDS // 60} minutes.")
+    return status
+
+
 def _cmd_report(ns: argparse.Namespace) -> int:
     from bouncer import __version__
     from bouncer.policy import builtin_pack_paths, load_policies
@@ -177,6 +251,11 @@ def main(argv: list[str] | None = None) -> int:
         help="optional user contract YAML, layered over the builtin packs",
     )
 
+    approve = sub.add_parser(
+        "approve", help="approve a one-time code from a client that cannot elicit")
+    approve.add_argument("codes", nargs="+", metavar="CODE")
+    sub.add_parser("pending", help="list open one-time approval codes")
+
     report = sub.add_parser("report", help="write a Markdown security review pack")
     report.add_argument("--policy", type=Path, default=None, help="user contract YAML")
     report.add_argument("--tools", type=Path, default=None,
@@ -195,6 +274,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_init(ns.config, ns.server)
     if ns.cmd == "report":
         return _cmd_report(ns)
+    if ns.cmd == "approve":
+        return _cmd_approve(ns.codes)
+    if ns.cmd == "pending":
+        return _cmd_pending()
     if ns.cmd == "run":
         return _cmd_run(ns.config, ns.upstream_name, ns.policy)
     if ns.cmd == "serve" or ns.cmd is None:

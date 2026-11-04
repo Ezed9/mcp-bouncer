@@ -6,6 +6,31 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 
 ## [Unreleased]
 
+### Added
+- One-time approvals for MCP clients that can't elicit. Before, every `ask`
+  from such a client was a deny with no way through. Now the deny carries a
+  short code. A human runs `bouncer approve <code>` in their own terminal, and
+  a retry of a call to the same destination passes once, within five minutes.
+  `bouncer pending` lists open codes.
+  - A code is bound to the wrapped server and the approval key (tool, argument,
+    destination). The proxy looks approvals up by that key, never by a code
+    the agent sends, so a code can't approve a different destination, tool or
+    server.
+  - A pending code expires five minutes after it was issued. An approved one
+    must be used within five minutes and allows one call. It is not remembered
+    for the session.
+  - State is `~/.bouncer/pending.json`, 0600 in a 0700 directory, written
+    atomically under a lock. The file is ignored if anyone other than the owner
+    can read or write it, or if it is a symlink. No MCP tool can approve.
+  - `bouncer approve` needs a terminal: stdin must be a TTY, and each code is
+    confirmed after it shows the server, tool and destination. Each approval
+    is written to the audit log as an `approve` line (contract `out_of_band`),
+    and the review pack counts them.
+  - Still denied, with no code: a tainted destination, a pinning `ask` (a tool
+    not present at startup), and more than 20 pending codes.
+  - Clients that elicit are unchanged.
+  - Research and design: `docs/clients-and-approvals.md`.
+
 ### Changed
 - `bouncer-mcp` runs on the MCP Python SDK 2.x (`mcp>=2,<3`), so it can be
   installed next to other packages that need mcp 2. It no longer installs with
