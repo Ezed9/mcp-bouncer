@@ -157,7 +157,7 @@ wheels = [
 
 [[package]]
 name = "bouncer-core"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "." }
 dependencies = [
     { name = "pyyaml" },
@@ -197,7 +197,7 @@ dev = [
 
 [[package]]
 name = "bouncer-mcp"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "bouncer-mcp" }
 dependencies = [
     { name = "anyio" },

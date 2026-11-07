@@ -6,6 +6,8 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-07
+
 ### Added
 - One-time approvals for MCP clients that can't elicit. Before, every `ask`
   from such a client was a deny with no way through. Now the deny carries a

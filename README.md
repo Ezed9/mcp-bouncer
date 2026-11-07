@@ -42,7 +42,7 @@ It covers MCP calls only ([limits](#limits)).
 Bouncer does not detect prompt injection. It assumes the agent will sometimes
 be fooled and limits what a fooled agent can do through MCP.
 
-**Status:** v0.1.4, early. MCP over stdio, one machine. Read the
+**Status:** v0.1.5, early. MCP over stdio, one machine. Read the
 [limits](#limits) before relying on it.
 
 ## See it in 60 seconds

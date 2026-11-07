@@ -1,12 +1,12 @@
 [project]
 name = "bouncer-mcp"
-version = "0.1.4"
+version = "0.1.5"
 description = "A local stdio MCP proxy that enforces bouncer-core's contracts on every tool call"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
-    "bouncer-core==0.1.4",
+    "bouncer-core==0.1.5",
     "anyio>=4.0",
     # Built on the 2.x low-level Server (on_* handlers, snake_case fields).
     # 1.x is not supported: its decorator API is gone in 2.x. The suite passes
