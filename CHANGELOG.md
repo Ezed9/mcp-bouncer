@@ -6,6 +6,13 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 
 ## [Unreleased]
 
+### Added
+- `bouncer report` has an AIUC-1 section. For each AIUC-1 control Bouncer
+  touches (D003.1-D003.5, B006.1-B006.3, B008.3) it says where the pack holds
+  evidence, filled in from the actual policy and audit log, and what Bouncer
+  does not cover. B001.1 is listed as not covered, because it needs a
+  third-party evaluation. It is a pointer for a reviewer, not an assessment.
+
 ## [0.1.5] - 2026-11-07
 
 ### Added

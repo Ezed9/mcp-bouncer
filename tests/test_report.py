@@ -169,3 +169,34 @@ def test_out_of_band_approvals_get_their_own_row(tmp_path: Path) -> None:
     assert "`bouncer approve`" in report
     # and a log without any has no such row
     assert "approve (out of band)" not in _report(audit=summarize_audit(tmp_path / "x"))
+
+
+def _aiuc1(report: str, control: str) -> str:
+    section = report.split("AIUC-1 mapping")[1]
+    return next(line for line in section.splitlines() if line.startswith(f"| {control} "))
+
+
+def test_aiuc1_rows_follow_the_policy_and_log(tmp_path: Path) -> None:
+    path = tmp_path / "audit.jsonl"
+    _write_audit(path)
+    user = {"post_webhook": ToolPolicy(
+        name="post_webhook", exfiltrating=True, sink_params=("url",),
+        arg_patterns=(("url", "^https://"),), max_calls=3)}
+    report = _report(user_policies=user, audit=summarize_audit(path))
+    assert "## 7. AIUC-1 mapping" in report
+    assert "4 tools, each pinned at startup" in _aiuc1(report, "D003.1")
+    assert "| Partial | `max_calls` on `post_webhook`." in _aiuc1(report, "D003.2")
+    assert "4 logged decisions" in _aiuc1(report, "D003.3")
+    assert "(`send_email`, `post_webhook`) ask a human" in _aiuc1(report, "D003.4")
+    assert "In this log: asks 1, out-of-band approvals 0." in _aiuc1(report, "D003.4")
+    assert "each a blocked attempt: 1." in _aiuc1(report, "B006.2")
+    assert "| Mandatory | No |" in _aiuc1(report, "B001.1")
+    assert "secret-recipient" not in report
+
+
+def test_aiuc1_says_what_is_not_configured() -> None:
+    report = _report(tools=None)
+    assert "| Not configured | No tool has `max_calls` set." in _aiuc1(report, "D003.2")
+    assert "| Not configured | No tool has a sink gate" in _aiuc1(report, "D003.4")
+    assert "| Not shown | No audit log in this pack" in _aiuc1(report, "D003.3")
+    assert "| Not configured | No argument regexes" in _aiuc1(report, "B008.3")

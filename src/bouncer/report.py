@@ -202,6 +202,9 @@ _OWASP = """\
 | LLM10 Unbounded Consumption | Partial | `max_calls` caps calls per tool per session; no token or cost limits. |
 """  # noqa: E501 (Markdown table rows cannot wrap)
 
+_AIUC1_SOURCE = "https://standard.aiuc-1.com/evidence/index"
+_AIUC1_READ = "2026-11-07"
+
 
 def build_report(
     *,
@@ -305,8 +308,120 @@ def build_report(
         f"## {n + 1}. OWASP LLM Top 10 mapping",
         "",
         _OWASP,
+        f"## {n + 2}. AIUC-1 mapping",
+        "",
     ]
+    lines += _aiuc1_section(rows, audit)
     return "\n".join(lines)
+
+
+def _aiuc1_section(
+    rows: list[tuple[str, str, ToolPolicy]], audit: AuditSummary | None
+) -> list[str]:
+    validated = [n for n, _, p in rows if p.arg_patterns or p.allowed_path_prefixes]
+    patterned = tuple(n for n, _, p in rows if p.arg_patterns)
+    capped = tuple(n for n, _, p in rows if p.max_calls is not None)
+    gated = tuple(n for n, _, p in rows if p.exfiltrating)
+    logged = audit is not None and audit.found
+    v: Counter[str] = audit.by_verdict if audit is not None and logged else Counter()
+
+    if audit is not None and logged:
+        span = f", {audit.first_ts} to {audit.last_ts}" if audit.first_ts else ""
+        log = (
+            f"Section 4: {audit.total} logged decisions{span}. Each line has a "
+            "timestamp, tool, arguments, verdict, reason and rule."
+        )
+    else:
+        log = "No audit log in this pack; pass `--audit`."
+    approval = (
+        f"Sink-gated tools ({_codes(gated)}) ask a human before sending to a destination "
+        "that is not allowlisted or already approved; clients that cannot ask get a "
+        "one-time `bouncer approve` code."
+        if gated
+        else "No tool has a sink gate, so nothing is routed to a human."
+    )
+    if logged:
+        approval += f" In this log: asks {v['ask']}, out-of-band approvals {v['approve']}."
+
+    table = [
+        (
+            "D003.1 Tool authorization & validation", "Mandatory", "Partial",
+            f"Section 2: {len(rows)} tools, each pinned at startup; {len(validated)} "
+            f"with argument rules (regex or path confinement); {len(gated)} with a "
+            "sink gate on destinations.",
+            "No per-user or per-agent access lists: one policy applies to every "
+            "caller of the proxy.",
+        ),
+        (
+            "D003.2 Rate limits for tools", "Mandatory",
+            "Partial" if capped else "Not configured",
+            f"`max_calls` on {_codes(capped)}." if capped else "No tool has `max_calls` set.",
+            "Caps are per tool per session. No time-window limits, no transaction "
+            "or spend caps.",
+        ),
+        (
+            "D003.3 Tool call log", "Mandatory", "Partial" if logged else "Not shown", log,
+            "Lines don't record the server name or tool version. The log is not "
+            "tamper-evident, and there are no alerts.",
+        ),
+        (
+            "D003.4 Human-approval workflows", "Mandatory",
+            "Partial" if gated else "Not configured", approval,
+            "Only new send destinations go to a human. Other high-risk operations "
+            "(payments, deletes, permission changes) are allowed or denied by rule.",
+        ),
+        (
+            "D003.5 Tool call log reviews", "Supplemental", "Partial",
+            "This pack summarizes the log by verdict, tool and rule. Generated on a "
+            "schedule with `--since` / `--until`, it can serve as the periodic review.",
+            "Bouncer does not record that a review happened or what changed after it.",
+        ),
+        (
+            "B006.1 Agent service access restrictions", "Mandatory", "Partial",
+            "Each wrapped server's tool list is pinned at startup; tools added later "
+            "are not forwarded. Writes can be confined to path prefixes.",
+            "Which MCP servers the agent can reach is set in the MCP client's config, "
+            "not by Bouncer. No network policy.",
+        ),
+        (
+            "B006.2 Agent security monitoring and alerting", "Mandatory",
+            "Partial" if logged else "Not shown",
+            f"Every decision is logged; denied calls in this log, each a blocked "
+            f"attempt: {v['deny']}." if logged
+            else "Every decision is logged; no log in this pack.",
+            "No alerting: nothing notifies anyone when a call is denied.",
+        ),
+        (
+            "B006.3 Execution-level safeguards", "Supplemental", "Partial",
+            "Every call is checked against the policy before it reaches the server; "
+            "tool names that appear after startup are refused.",
+            "A changed schema for an existing tool name is not detected. No sandbox "
+            "for files, network or credentials outside MCP.",
+        ),
+        (
+            "B008.3 Agentic interface data integrity", "Supplemental",
+            "Partial" if patterned else "Not configured",
+            f"Argument regexes on {_codes(patterned)}." if patterned
+            else "No argument regexes configured.",
+            "No message signing and no validation of tool outputs.",
+        ),
+        (
+            "B001.1 Third-party evaluation report", "Mandatory", "No", "None.",
+            "Needs a report from an independent tester. Benchmark numbers run by "
+            "Bouncer's author do not count.",
+        ),
+    ]
+    out = [
+        f"Control IDs and evidence names are from the AIUC-1 evidence index "
+        f"({_AIUC1_SOURCE}), read {_AIUC1_READ}. The table shows where this pack "
+        "holds evidence for each control Bouncer touches and what is left for you "
+        "to cover. It is not an AIUC-1 assessment or certification.",
+        "",
+        "| AIUC-1 control | Required | Bouncer | Evidence in this pack | Gap |",
+        "|---|---|---|---|---|",
+    ]
+    out += [f"| {' | '.join(row)} |" for row in table]
+    return out
 
 
 def _audit_section(audit: AuditSummary | None) -> list[str]:

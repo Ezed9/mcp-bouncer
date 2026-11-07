@@ -229,7 +229,9 @@ but nothing makes it tamper-evident.
 
 **Review pack.** `bouncer report` writes a Markdown pack: each tool and the
 controls on it, an audit log summary, findings, what it does and doesn't
-cover, and an OWASP LLM Top 10 mapping.
+cover, an OWASP LLM Top 10 mapping, and an AIUC-1 mapping that points
+at the evidence for each control Bouncer touches and names what it leaves to
+you.
 
 ```bash
 bouncer report --policy bouncer.yaml --tools tools.json -o review-pack.md
