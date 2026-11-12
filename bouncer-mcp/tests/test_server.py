@@ -154,3 +154,32 @@ def test_cli_serve_help(capsys) -> None:
     assert exc.value.code == 0
     captured = capsys.readouterr()
     assert "serve" in captured.out or "policy" in captured.out
+
+
+def test_check_verdict_does_not_write_the_real_audit_log(tmp_path, monkeypatch) -> None:
+    # A hypothetical call is not evidence for `bouncer report`.
+    real = tmp_path / "audit.jsonl"
+    monkeypatch.setattr("bouncer_mcp.server._DEFAULT_AUDIT_PATH", real)
+    res = handle_builtin_tool_call(
+        "bouncer_check_verdict", {"tool": "send_email", "args": {"to": "a@example.com"}}
+    )
+    assert res is not None
+    assert not real.exists()
+
+
+def test_check_verdict_sees_a_destination_arg_of_an_unpacked_tool() -> None:
+    res = handle_builtin_tool_call(
+        "bouncer_check_verdict",
+        {"tool": "notify_person", "args": {"recipient": "someone@example.com"}},
+    )
+    assert res is not None
+    assert json.loads(res.content[0].text)["verdict"] == "ask"
+
+
+def test_verify_policy_reports_a_mistyped_value() -> None:
+    res = handle_builtin_tool_call(
+        "bouncer_verify_policy",
+        {"policy_yaml": "write_file:\n  write_params: [path]\n  allowed_path_prefixes: /data\n"},
+    )
+    assert res is not None
+    assert json.loads(res.content[0].text)["valid"] is False

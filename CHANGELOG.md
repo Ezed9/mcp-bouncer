@@ -6,12 +6,71 @@ packages use [Semantic Versioning](https://semver.org/) and are released togethe
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-12
+
 ### Added
 - `bouncer report` has an AIUC-1 section. For each AIUC-1 control Bouncer
   touches (D003.1-D003.5, B006.1-B006.3, B008.3) it says where the pack holds
   evidence, filled in from the actual policy and audit log, and what Bouncer
   does not cover. B001.1 is listed as not covered, because it needs a
   third-party evaluation. It is a pointer for a reviewer, not an assessment.
+- `bouncer-mcp` also installs a `bouncer-mcp` command, the same as `bouncer`,
+  so `uvx bouncer-mcp` works. Before, uvx found no executable with the
+  package's name and stopped.
+- `server.json` for the official MCP Registry, and the `mcp-name` line in the
+  `bouncer-mcp` README that the registry checks to confirm who owns the PyPI
+  package. The registry entry starts `bouncer serve`.
+
+### Changed
+- **Breaking for policies with mistakes in them:** a policy file with a
+  misspelled key, a value of the wrong type or an empty tool entry is now an
+  error at startup. Before, it was ignored, which turned the control off:
+  `allowed_path_prefixes: /workspace` (a string, not a list) confined nothing,
+  and `max_calls: "1"` set no budget. `max_calls` must be a whole number of 0
+  or more.
+- A tool entry that sets `sink_params` or `trusted_destinations` without
+  `exfiltrating: true` is an error. A user entry replaces the pack entry, so an
+  entry that only added an allowlist switched the destination check off for
+  that tool, and a send to an address from untrusted output was allowed.
+- `bouncer init` skips servers that have no `command` (remote `url` servers).
+  It used to wrap them, and the wrapped entry could not start.
+- Packaging: both packages carry classifiers, keywords and links to the
+  repository, docs and changelog. `bouncer-mcp` now ships the MIT license
+  file. The `bouncer-core` page on PyPI is a short page with working links
+  (the repository README's images and relative links did not resolve
+  there), and its source archive holds the package source only.
+
+### Fixed
+- An address that follows a JSON escape in tool output is now tainted. A
+  server that returns JSON as text writes a newline as `\n`, and the
+  whole-token match from 0.1.5 read `\nattacker@evil.com` as a longer token, so
+  the send was asked instead of denied. Same for `\t` and `<`.
+- The text of an upstream error, of an embedded resource and of a resource
+  link is recorded as untrusted output. Before, only text blocks and
+  structured content were.
+- The fallback for tools with no pack entry gave a two-call budget to any tool
+  with `rm` or `drop` anywhere in its name, such as `browser_fill_form`,
+  `get_user_permissions` and `dropbox_list_files`. Those two verbs must now be
+  a whole word of the name.
+- `bouncer_check_verdict` (in `bouncer serve`) no longer writes its
+  hypothetical verdicts to `~/.bouncer/audit.jsonl`, where `bouncer report`
+  counted them. It also treats the argument names of the call as the tool's
+  parameters, so a tool with no pack entry gets the same fallback the proxy
+  applies.
+
+### Security
+- The audit log is created with mode 0600 and its directory with 0700, and a
+  log created by an older version is tightened to 0600 on the next run. It
+  records argument values and was readable by other local users.
+- Each audit line is written with one `write` call, so lines from several
+  proxies appending to the same file don't interleave.
+
+### Documentation
+- README: the feature list now covers the approval fallback for clients that
+  can't elicit, and the review pack's OWASP and AIUC-1 mappings.
+- README, `docs/how-it-works.md` and CONTRIBUTING now match the code: the
+  roadmap no longer lists `mcp` 2.x support (it shipped in 0.1.5), and the
+  test count, the setup command and the CI Python versions are corrected.
 
 ## [0.1.5] - 2026-11-07
 

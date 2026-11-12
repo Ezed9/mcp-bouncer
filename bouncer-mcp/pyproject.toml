@@ -1,12 +1,25 @@
 [project]
 name = "bouncer-mcp"
-version = "0.1.5"
+version = "0.1.6"
 description = "A local stdio MCP proxy that enforces bouncer-core's contracts on every tool call"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
+authors = [{ name = "Bouncer contributors" }]
+keywords = ["mcp", "model-context-protocol", "mcp-proxy", "ai-agents", "agent-security", "prompt-injection", "guardrails"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+]
 dependencies = [
-    "bouncer-core==0.1.5",
+    "bouncer-core==0.1.6",
     "anyio>=4.0",
     # Built on the 2.x low-level Server (on_* handlers, snake_case fields).
     # 1.x is not supported: its decorator API is gone in 2.x. The suite passes
@@ -18,10 +31,16 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/Ezed9/mcp-bouncer"
+Repository = "https://github.com/Ezed9/mcp-bouncer"
+Documentation = "https://github.com/Ezed9/mcp-bouncer/blob/main/docs/how-it-works.md"
+Changelog = "https://github.com/Ezed9/mcp-bouncer/blob/main/CHANGELOG.md"
 Issues = "https://github.com/Ezed9/mcp-bouncer/issues"
 
 [project.scripts]
 bouncer = "bouncer_mcp.cli:main"
+# Same command under the package name: `uvx bouncer-mcp` and the MCP Registry
+# both run the executable named after the package.
+bouncer-mcp = "bouncer_mcp.cli:main"
 
 # Resolves from the sibling directory in development; from PyPI once published.
 [tool.uv.sources]

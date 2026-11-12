@@ -94,8 +94,8 @@ Four deterministic contract types, checked in this order (`ContractEngine._decid
    - This is a value-level taint check (`src/bouncer/taint.py`): fold case,
      whitespace, Unicode compatibility forms (full-width `＠`) and zero-width
      characters, then match as a whole token against everything the session
-     has seen returned from an upstream tool (also in percent- and
-     HTML-entity-decoded form). A recipient string is split into its
+     has seen returned from an upstream tool, error messages included (also
+     in percent-, HTML-entity- and JSON-escape-decoded form). A recipient string is split into its
      addresses (`email.utils.getaddresses`, `;` read as `,`), every
      address-shaped token in it is gated too, and an address inside a URL
      query or without its `+tag` is checked for taint. It decides `deny` vs.
@@ -114,18 +114,23 @@ Policy for a tool is resolved in this order, first match wins
 3. **Schema heuristics** (`src/bouncer/heuristics.py`) — for any tool
    with no user or pack entry, a conservative fallback that flags
    destination-shaped params (`to`, `cc`, `url`, `channel`, …) as sinks and
-   `delete`/`remove`-verb tools with a default call budget.
+   `delete`/`remove`-verb tools (and `rm`, `rmdir`, `drop` as whole words)
+   with a default call budget.
 
-A malformed policy file (top-level YAML that isn't a tool-name mapping, or an
-invalid regex in `arg_patterns`) **fails closed**: `load_policies` /
-`_policy_from_dict` raise `PolicyError` rather than silently ignoring the
-file.
+A malformed policy file **fails closed**: `load_policies` /
+`_policy_from_dict` raise `PolicyError` and the proxy does not start. That
+covers top-level YAML that isn't a tool-name mapping, an entry that isn't a
+mapping, an unknown key, a value of the wrong type (a string where a list
+belongs, a `max_calls` that isn't a whole number of 0 or more), and an invalid
+regex in `arg_patterns`.
 
 > **A user entry *replaces* the pack entry for that tool — it does not merge.**
 > If you override `send_email` to add a `trusted_destinations` allowlist, you
-> must also restate `exfiltrating: true` and its `sink_params`, or you silently
-> turn the sink gate **off** for that tool. Copy the tool's block from the pack
-> (`src/bouncer/packs/*.yaml`) and add to it. See
+> must also restate `exfiltrating: true` and its `sink_params`. Setting
+> `sink_params` or `trusted_destinations` without `exfiltrating: true` is a
+> `PolicyError`. An override that sets none of the three (only `max_calls`,
+> say) still loads and turns the sink gate **off** for that tool. Copy the
+> tool's block from the pack (`src/bouncer/packs/*.yaml`) and add to it. See
 > [`examples/bouncer.yaml`](../examples/bouncer.yaml).
 
 ## MCP Tools (Skills)
@@ -240,6 +245,10 @@ This is a real line captured during the manual smoke test — see
 approves an `ask`, the same client call re-evaluates and immediately writes its
 `allow` line, so an approved send appears in the log as an `ask` line followed
 by an `allow` line for the same call.
+
+The log is created with mode 0600, and a log left by an older version is
+tightened to 0600 the next time the proxy starts. `~/.bouncer` is created 0700
+if it doesn't exist yet; an existing directory keeps its mode.
 
 ## Demo: allow, then deny, for real
 
@@ -364,7 +373,7 @@ recording is the scripted helpdesk demo in
   gated; write a policy entry for such tools.
 - **Matching folds some encodings, not all.** Taint matching folds case,
   whitespace, Unicode compatibility forms and zero-width characters, decodes
-  percent-encoding and HTML entities in output, and checks addresses inside
+  percent-encoding, HTML entities and JSON string escapes in output, and checks addresses inside
   URLs and without a trailing dot or `+tag`. Base64,
   quoted-printable, homoglyphs, punycode, `-` subaddressing and assembled
   addresses are not recognized, so they get `ask`, not `deny`.

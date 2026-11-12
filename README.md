@@ -36,13 +36,19 @@ It covers MCP calls only ([limits](#limits)).
 - **Puts hard limits on write tools.** Path confinement, regex checks on
   arguments, per-session call budgets, and tools that weren't there at startup
   are refused.
+- **Asks a human, even when the client can't.** A new destination goes to a
+  person: through the client's own prompt if it supports MCP elicitation, or
+  through a one-time `bouncer approve <code>` in their own terminal if it
+  doesn't.
 - **Leaves evidence.** Every `allow`, `deny` and `ask` is a JSON line in
-  `~/.bouncer/audit.jsonl`, and `bouncer report` turns it into a review pack.
+  `~/.bouncer/audit.jsonl`, and `bouncer report` turns it into a review pack,
+  with OWASP LLM Top 10 and AIUC-1 mappings that point at the evidence and name
+  the gaps.
 
 Bouncer does not detect prompt injection. It assumes the agent will sometimes
 be fooled and limits what a fooled agent can do through MCP.
 
-**Status:** v0.1.5, early. MCP over stdio, one machine. Read the
+**Status:** v0.1.6, early. MCP over stdio, one machine. Read the
 [limits](#limits) before relying on it.
 
 ## See it in 60 seconds
@@ -85,9 +91,11 @@ Any config with an `mcpServers` block works, for example Claude Code's
 `init` prints the rewritten config and asks before writing. Each server entry
 now launches `bouncer run`, and the original entry (command, args, `env`,
 `cwd`) is kept under `x-bouncer-upstream`, which is how `run` starts the real
-server and how you undo the change by hand. Restart your client.
+server and how you undo the change by hand. An entry with no `command` (a
+remote server reached by `url`) is left as it is, because Bouncer only proxies
+stdio servers. Restart your client.
 
-Three things to know on the first run:
+Four things to know on the first run:
 
 - **Your client must find `bouncer`.** The rewritten entry uses
   `"command": "bouncer"`. Desktop apps may not see your shell's `PATH`; if the
@@ -141,9 +149,10 @@ Three things to know on the first run:
 
 `bouncer run` starts the real server as a subprocess, records its tool list at
 startup, and checks every call before forwarding it. A denied call is never
-forwarded, so it has no side effects. Everything the server returns (text and
-structured content) is recorded as untrusted, and a later destination that
-appears in it is denied. An approval is remembered for the rest of the session.
+forwarded, so it has no side effects. Everything the server returns (text,
+structured content, embedded resources, resource links and error messages) is
+recorded as untrusted, and a later destination that appears in it is denied.
+An approval is remembered for the rest of the session.
 
 The check is plain Python: normalize case and whitespace, then look for the
 destination inside what the server has returned this session. A miss means
@@ -179,9 +188,16 @@ delete_file:
 ```
 
 Add `"--policy", "/abs/path/bouncer.yaml"` to the wrapped server's `args`. A
-user entry **replaces** the pack entry for that tool, so restate
-`exfiltrating` and `sink_params` when you override a sending tool, or the
-destination check is off for it. Use absolute path prefixes: a relative one is
+policy with a mistake in it (a misspelled key, a value of the wrong type)
+stops the proxy at startup; nothing is skipped or guessed.
+
+A user entry **replaces** the pack entry for that tool, so restate
+`exfiltrating: true` and `sink_params` when you override a sending tool.
+Setting `sink_params` or `trusted_destinations` without `exfiltrating: true`
+is an error. An override with none of the three, a bare `max_calls` for
+example, still loads, and the destination check is off for that tool.
+
+Use absolute path prefixes: a relative one is
 resolved against whatever directory your client starts the proxy in. Start
 from [`examples/bouncer.yaml`](examples/bouncer.yaml).
 
@@ -224,8 +240,9 @@ full arguments, verdict, reason and the rule that fired. `ask` is an
 escalation: an approved one is followed by an `allow` line for the same call;
 a declined one has no further line. A tool that wasn't present at startup is
 logged as `ask` and blocked. The file is plaintext and contains whatever the
-agent passed as arguments (email bodies included). Bouncer only appends to it,
-but nothing makes it tamper-evident.
+agent passed as arguments (email bodies included). It is created readable and
+writable by your user only (mode 0600). Bouncer only appends to it, but
+nothing makes it tamper-evident.
 
 **Review pack.** `bouncer report` writes a Markdown pack: each tool and the
 controls on it, an audit log summary, findings, what it does and doesn't
@@ -263,8 +280,9 @@ Report vulnerabilities privately: [`SECURITY.md`](SECURITY.md).
   only if it appears in earlier output as a whole token: `ana@x.com` inside
   `dana@x.com` doesn't count, so an attacker address glued to other text gets
   `ask`, not `deny`. Before matching, case, whitespace, full-width forms and
-  zero-width characters are folded, and percent-encoding and HTML entities in
-  output are decoded. An address inside a URL query, or sent with a trailing
+  zero-width characters are folded, and percent-encoding, HTML entities and
+  JSON string escapes (`\u0040` for `@`) in output are decoded. An address
+  inside a URL query, or sent with a trailing
   dot or a `+tag`, is checked too. Base64, quoted-printable, homoglyphs (Cyrillic `а`
   for `a`), punycode, `-` subaddressing and assembled addresses ("attacker at
   evil dot com") get `ask`, not `deny`. Destinations shorter than six
@@ -409,8 +427,7 @@ sh benchmark/run_final.sh      # model defaults to openai/gpt-4o-mini
   harness. [`scripts/demo.py`](scripts/demo.py) shows how to drive it.
 
 **Roadmap** (not built yet): detecting a changed schema for an already-pinned
-tool; support for `mcp` 2.x (capped below 2 today); packs verified against
-live gmail, slack, github and gdrive servers.
+tool; packs verified against live gmail, slack, github and gdrive servers.
 
 ## Contributing
 
@@ -419,7 +436,7 @@ ambiguous case resolves to `ask` or `deny`, never a silent `allow`.
 
 ```bash
 uv sync --all-packages
-uv run pytest -q        # 253 tests (3 need the benchmark extra)
+uv run pytest -q        # 277 tests (3 need the benchmark extra)
 uv run ruff check .
 ```
 

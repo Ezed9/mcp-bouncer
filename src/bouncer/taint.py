@@ -48,19 +48,41 @@ def fold(text: str) -> str:
     return _WS.sub(" ", t.strip()).casefold()
 
 
+_JSON_ESCAPE = re.compile(r'\\(?:u([0-9a-fA-F]{4})|([nrtbf/"\\]))')
+_JSON_CHARS = {"n": "\n", "r": "\r", "t": "\t", "b": " ", "f": " "}
+
+
+def _json_unescape(text: str) -> str:
+    def repl(m: re.Match[str]) -> str:
+        if m.group(1):
+            return chr(int(m.group(1), 16))
+        return _JSON_CHARS.get(m.group(2), m.group(2))
+
+    return _JSON_ESCAPE.sub(repl, text)
+
+
+def _html_percent_decode(text: str) -> str:
+    return unquote(html.unescape(text))
+
+
 class TaintTracker:
     def __init__(self, min_len: int = 6) -> None:
         self._min_len = min_len
         self._outputs: list[str] = []
 
     def record_output(self, text: str) -> None:
-        self._outputs.append(fold(text))
-        # Also keep the HTML-entity and percent-decoded form, so
-        # "attacker&#64;evil.com" or "mailto:attacker%40evil.com" taints the
-        # plain address the agent decodes and sends.
-        decoded = unquote(html.unescape(text))
-        if decoded != text:
-            self._outputs.append(fold(decoded))
+        # Also keep decoded forms, so the plain address the agent reads and
+        # sends is tainted. JSON escapes: a server that returns JSON as text
+        # writes a newline as "\n", and "...\nattacker@evil.com" would glue an
+        # "n" onto the address. HTML entities and percent-encoding:
+        # "attacker&#64;evil.com", "mailto:attacker%40evil.com".
+        forms = [text]
+        for decode in (_json_unescape, _html_percent_decode):
+            for form in list(forms):
+                decoded = decode(form)
+                if decoded not in forms:
+                    forms.append(decoded)
+        self._outputs.extend(fold(form) for form in forms)
 
     def classify(self, value: str) -> bool:
         needle = fold(value)

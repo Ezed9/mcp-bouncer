@@ -9,7 +9,7 @@ cleverness. Small, well-tested PRs are far easier to accept than large ones.
 Bouncer uses [uv](https://docs.astral.sh/uv/). From the repository root:
 
 ```bash
-uv sync                # install the project + dev tools (pytest, ruff)
+uv sync --all-packages # install both packages + dev tools (pytest, ruff)
 uv run pytest -q       # run the full test suite
 uv run ruff check .    # lint
 ```
@@ -21,7 +21,7 @@ uv run --extra benchmark python -m benchmark.run_agentdojo   # needs GEMINI_API_
 uv run python -m benchmark.run_agentdojo                     # no key: scorer test only
 ```
 
-CI runs exactly `ruff check .` and `pytest -q` on Python 3.12 and 3.13. Get
+CI runs exactly `ruff check .` and `pytest -q` on Python 3.12, 3.13 and 3.14. Get
 both green locally before opening a PR.
 
 ## The one rule that isn't negotiable: fail closed

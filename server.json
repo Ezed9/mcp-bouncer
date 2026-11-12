@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Ezed9/mcp-bouncer",
+  "title": "Bouncer",
+  "description": "Stdio MCP proxy that denies agent sends to destinations first seen in untrusted tool output.",
+  "websiteUrl": "https://github.com/Ezed9/mcp-bouncer#readme",
+  "repository": {
+    "url": "https://github.com/Ezed9/mcp-bouncer",
+    "source": "github",
+    "subfolder": "bouncer-mcp"
+  },
+  "version": "0.1.6",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "bouncer-mcp",
+      "version": "0.1.6",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "serve"
+        }
+      ]
+    }
+  ]
+}
