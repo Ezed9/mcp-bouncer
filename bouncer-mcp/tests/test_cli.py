@@ -194,3 +194,10 @@ def test_report_writes_markdown_file(tmp_path) -> None:
     assert "## 2. Tool inventory and controls" in text
     assert "No audit log found" in text
     assert "OWASP LLM Top 10" in text
+
+
+def test_rewrite_leaves_a_remote_server_alone() -> None:
+    # No `command`: `bouncer run` would have nothing to start, so wrapping it
+    # would only break the server.
+    cfg = {"mcpServers": {"remote": {"type": "http", "url": "https://x.example/mcp"}}}
+    assert rewrite_config(cfg, "remote", command="bouncer", args=["run"]) == cfg

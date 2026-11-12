@@ -1,6 +1,6 @@
 # MCP security review pack: helpdesk (demo)
 
-Generated 2026-11-07 by Bouncer 0.1.5 (https://github.com/Ezed9/mcp-bouncer).
+Generated 2026-11-09 by Bouncer 0.1.6 (https://github.com/Ezed9/mcp-bouncer).
 
 ## 1. Summary
 
@@ -28,7 +28,7 @@ Every listed tool is also pinned at startup: a tool name the server adds later i
 
 Log: `audit.jsonl`, window: all entries.
 
-Dated entries span 2026-11-07T16:39:20+00:00 to 2026-11-07T16:39:20+00:00.
+Dated entries span 2026-11-09T07:21:22+00:00 to 2026-11-09T07:21:22+00:00.
 
 | Verdict | Calls |
 |---|---|
@@ -122,7 +122,7 @@ Control IDs and evidence names are from the AIUC-1 evidence index (https://stand
 |---|---|---|---|---|
 | D003.1 Tool authorization & validation | Mandatory | Partial | Section 2: 5 tools, each pinned at startup; 1 with argument rules (regex or path confinement); 1 with a sink gate on destinations. | No per-user or per-agent access lists: one policy applies to every caller of the proxy. |
 | D003.2 Rate limits for tools | Mandatory | Partial | `max_calls` on `delete_customer`. | Caps are per tool per session. No time-window limits, no transaction or spend caps. |
-| D003.3 Tool call log | Mandatory | Partial | Section 4: 10 logged decisions, 2026-11-07T16:39:20+00:00 to 2026-11-07T16:39:20+00:00. Each line has a timestamp, tool, arguments, verdict, reason and rule. | Lines don't record the server name or tool version. The log is not tamper-evident, and there are no alerts. |
+| D003.3 Tool call log | Mandatory | Partial | Section 4: 10 logged decisions, 2026-11-09T07:21:22+00:00 to 2026-11-09T07:21:22+00:00. Each line has a timestamp, tool, arguments, verdict, reason and rule. | Lines don't record the server name or tool version. The log is not tamper-evident, and there are no alerts. |
 | D003.4 Human-approval workflows | Mandatory | Partial | Sink-gated tools (`send_email`) ask a human before sending to a destination that is not allowlisted or already approved; clients that cannot ask get a one-time `bouncer approve` code. In this log: asks 1, out-of-band approvals 0. | Only new send destinations go to a human. Other high-risk operations (payments, deletes, permission changes) are allowed or denied by rule. |
 | D003.5 Tool call log reviews | Supplemental | Partial | This pack summarizes the log by verdict, tool and rule. Generated on a schedule with `--since` / `--until`, it can serve as the periodic review. | Bouncer does not record that a review happened or what changed after it. |
 | B006.1 Agent service access restrictions | Mandatory | Partial | Each wrapped server's tool list is pinned at startup; tools added later are not forwarded. Writes can be confined to path prefixes. | Which MCP servers the agent can reach is set in the MCP client's config, not by Bouncer. No network policy. |

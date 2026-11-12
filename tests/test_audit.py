@@ -21,3 +21,16 @@ def test_write_appends_one_json_line_per_entry(tmp_path: Path) -> None:
     assert first["verdict"] == "deny"
     assert first["contract"] == "sink_gate"
     assert first["ts"].endswith("+00:00")
+
+
+def test_log_is_private_to_the_user(tmp_path: Path) -> None:
+    # It records argument values, so only the owner may read it. A log an
+    # older version created with the default mode is tightened too.
+    old = tmp_path / "old.jsonl"
+    old.write_text("")
+    old.chmod(0o644)
+    new = tmp_path / "new" / "audit.jsonl"
+    for path in (old, new):
+        AuditLog(path).write(AuditEntry(tool="read_file"))
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert len(path.read_text().splitlines()) == 1

@@ -22,16 +22,56 @@ class PolicyError(ValueError):
     """Raised when a policy file is structurally invalid."""
 
 
-def _policy_from_dict(name: str, raw: dict[str, object]) -> ToolPolicy:
-    def _tuple(key: str) -> tuple[str, ...]:
-        val = raw.get(key, [])
-        return tuple(str(x) for x in val) if isinstance(val, list) else ()
+_KEYS = frozenset({
+    "exfiltrating", "sink_params", "trusted_destinations", "write_params",
+    "allowed_path_prefixes", "arg_patterns", "max_calls",
+})
 
-    patterns = raw.get("arg_patterns", {})
-    arg_patterns = (
-        tuple((str(k), str(v)) for k, v in patterns.items())
-        if isinstance(patterns, dict) else ()
-    )
+
+def _policy_from_dict(name: str, raw: object) -> ToolPolicy:
+    # A misspelled key or a value of the wrong type is an error, never ignored:
+    # ignoring one silently turns off the control it was meant to set.
+    if not isinstance(raw, dict):
+        raise PolicyError(
+            f"policy for tool {name!r} must be a mapping (use {{}} for no rules), "
+            f"got {type(raw).__name__}"
+        )
+    unknown = sorted(str(k) for k in raw if k not in _KEYS)
+    if unknown:
+        raise PolicyError(
+            f"unknown key(s) {unknown} for tool {name!r}; known keys: {sorted(_KEYS)}"
+        )
+
+    def _tuple(key: str) -> tuple[str, ...]:
+        val = raw.get(key)
+        if val is None:
+            return ()
+        if not isinstance(val, list) or any(isinstance(x, (list, dict)) for x in val):
+            raise PolicyError(
+                f"{key} for tool {name!r} must be a list of strings, got {val!r}"
+            )
+        return tuple(str(x) for x in val)
+
+    exfiltrating = raw.get("exfiltrating", False)
+    if not isinstance(exfiltrating, bool):
+        raise PolicyError(
+            f"exfiltrating for tool {name!r} must be true or false, got {exfiltrating!r}"
+        )
+    sink_params = _tuple("sink_params")
+    trusted_destinations = _tuple("trusted_destinations")
+    if (sink_params or trusted_destinations) and not exfiltrating:
+        raise PolicyError(
+            f"tool {name!r} sets sink_params or trusted_destinations without "
+            "`exfiltrating: true`, so the destination check would be off for it"
+        )
+
+    patterns = raw.get("arg_patterns")
+    if patterns is not None and not isinstance(patterns, dict):
+        raise PolicyError(
+            f"arg_patterns for tool {name!r} must be a mapping of arg to regex, "
+            f"got {patterns!r}"
+        )
+    arg_patterns = tuple((str(k), str(v)) for k, v in (patterns or {}).items())
     for arg, pattern in arg_patterns:
         try:
             re.compile(pattern)
@@ -41,19 +81,22 @@ def _policy_from_dict(name: str, raw: dict[str, object]) -> ToolPolicy:
                 f"arg {arg!r}: {pattern!r} ({exc})"
             ) from exc
     max_calls = raw.get("max_calls")
+    if max_calls is not None and (
+        not isinstance(max_calls, int) or isinstance(max_calls, bool) or max_calls < 0
+    ):
+        raise PolicyError(
+            f"max_calls for tool {name!r} must be a whole number of 0 or more, "
+            f"got {max_calls!r}"
+        )
     return ToolPolicy(
         name=name,
-        exfiltrating=bool(raw.get("exfiltrating", False)),
-        sink_params=_tuple("sink_params"),
-        trusted_destinations=_tuple("trusted_destinations"),
+        exfiltrating=exfiltrating,
+        sink_params=sink_params,
+        trusted_destinations=trusted_destinations,
         write_params=_tuple("write_params"),
         allowed_path_prefixes=_tuple("allowed_path_prefixes"),
         arg_patterns=arg_patterns,
-        max_calls=(
-            int(max_calls)
-            if isinstance(max_calls, int) and not isinstance(max_calls, bool)
-            else None
-        ),
+        max_calls=max_calls,
     )
 
 
@@ -72,7 +115,7 @@ def load_policies(paths: list[Path]) -> dict[str, ToolPolicy]:
                 f"tool-name to policy, got {type(data).__name__}"
             )
         for name, raw in data.items():
-            out[name] = _policy_from_dict(name, raw if isinstance(raw, dict) else {})
+            out[name] = _policy_from_dict(name, raw)
     return out
 
 

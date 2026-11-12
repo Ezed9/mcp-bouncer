@@ -20,3 +20,5 @@ a recorded schema, a policy, and a taint log.
 
 Full documentation, the threat model, and the benchmark results are in the
 [repository README](https://github.com/Ezed9/mcp-bouncer#readme).
+
+<!-- mcp-name: io.github.Ezed9/mcp-bouncer -->

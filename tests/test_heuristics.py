@@ -30,3 +30,13 @@ def test_plain_read_tool_has_no_constraints() -> None:
     assert p.exfiltrating is False
     assert p.write_params == ()
     assert p.max_calls is None
+
+
+def test_short_delete_verbs_match_whole_words_only() -> None:
+    for name in (
+        "browser_fill_form", "get_user_permissions", "transform_data",
+        "confirm_booking", "dropbox_list_files",
+    ):
+        assert derive_policy(name, _schema()).max_calls is None, name
+    for name in ("rm", "rm_file", "rmdir", "drop_table", "dropTable", "bulkdelete", "removeItem"):
+        assert derive_policy(name, _schema()).max_calls == 2, name

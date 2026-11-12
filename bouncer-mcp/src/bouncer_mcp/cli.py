@@ -40,6 +40,8 @@ def rewrite_config(
     entry = servers[server_name]
     if not isinstance(entry, dict) or _SENTINEL in entry:
         return out  # already wrapped -> idempotent no-op
+    if not isinstance(entry.get("command"), str):
+        return out  # a remote (url) server: no stdio command for `run` to start
     # Stash the WHOLE original entry -- not just {command, args} -- so `env`,
     # `cwd`, and any other keys (credentials for github/gmail/slack upstreams)
     # survive the wrap and can be recovered by `_upstream_from_config`.

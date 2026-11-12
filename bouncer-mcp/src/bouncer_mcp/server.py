@@ -147,16 +147,16 @@ def handle_builtin_tool_call(
         user_yaml = arguments.get("user_policy_yaml")
 
         paths = builtin_pack_paths()
-        temp_dir_obj = None
-        if isinstance(user_yaml, str) and user_yaml.strip():
-            temp_dir_obj = tempfile.TemporaryDirectory()
-            temp_p = Path(temp_dir_obj.name) / "policy.yaml"
-            temp_p.write_text(user_yaml)
-            paths = [*paths, temp_p]
-        elif user_policy is not None:
-            paths = [*paths, user_policy]
+        # A hypothetical call is not evidence: its verdict goes to a throwaway
+        # log, never to the audit log that `bouncer report` reads.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            if isinstance(user_yaml, str) and user_yaml.strip():
+                temp_p = Path(temp_dir) / "policy.yaml"
+                temp_p.write_text(user_yaml)
+                paths = [*paths, temp_p]
+            elif user_policy is not None:
+                paths = [*paths, user_policy]
 
-        try:
             resolver = PolicyResolver(overrides=load_policies(paths))
             taint = TaintTracker()
             if isinstance(untrusted, list):
@@ -167,8 +167,10 @@ def handle_builtin_tool_call(
                 resolver=resolver,
                 taint=taint,
                 approvals=ApprovalStore(),
-                audit=AuditLog(_DEFAULT_AUDIT_PATH),
-                schemas={tool_name: {}},
+                audit=AuditLog(Path(temp_dir) / "audit.jsonl"),
+                # No real schema here, so the argument names stand in for it:
+                # the heuristics then see a `to` or `url` as the proxy would.
+                schemas={tool_name: {"properties": dict.fromkeys(call_args, {})}},
             )
             decision = engine.evaluate(ToolCall(tool=tool_name, args=call_args))
             payload = {
@@ -186,9 +188,6 @@ def handle_builtin_tool_call(
                     )
                 ]
             )
-        finally:
-            if temp_dir_obj is not None:
-                temp_dir_obj.cleanup()
 
     if name == "bouncer_verify_policy":
         policy_yaml = str(arguments.get("policy_yaml", ""))
@@ -201,7 +200,7 @@ def handle_builtin_tool_call(
                 )
             tools_covered = []
             for t_name, raw in data.items():
-                _policy_from_dict(t_name, raw if isinstance(raw, dict) else {})
+                _policy_from_dict(t_name, raw)
                 tools_covered.append(t_name)
             result = {
                 "valid": True,

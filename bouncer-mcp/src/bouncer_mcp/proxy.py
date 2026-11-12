@@ -202,12 +202,18 @@ def _distinct_destination_count(call: ToolCall) -> int:
 
 
 def _result_text(result: mcp_types.CallToolResult) -> str:
-    """Flatten an upstream CallToolResult's content into plain text for taint."""
+    """Flatten an upstream CallToolResult's content into plain text for taint.
+
+    Text blocks, plus the text and uri of an embedded resource and the uri,
+    name, title and description of a resource link: the model reads those too.
+    """
     parts: list[str] = []
     for block in result.content:
-        text = getattr(block, "text", None)
-        if text is not None:
-            parts.append(str(text))
+        for obj in (block, getattr(block, "resource", None)):
+            for field in ("text", "uri", "name", "title", "description"):
+                value = getattr(obj, field, None)
+                if value is not None:
+                    parts.append(str(value))
     return "\n".join(parts)
 
 
@@ -364,6 +370,9 @@ class BouncerProxy:
                 # upstream CallToolResult, relayed verbatim.
                 return result
             except Exception as exc:
+                # An upstream error message is server-controlled text the model
+                # will read, so it is untrusted output like any result.
+                self._engine.register_output(str(exc))
                 return _error_result(str(exc))
 
         server: Server = Server(
